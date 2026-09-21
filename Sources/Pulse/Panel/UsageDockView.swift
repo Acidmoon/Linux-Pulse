@@ -42,6 +42,8 @@ enum DockLayout {
         PanelMetrics.usesRoundEnds ? 8 * PanelMetrics.scale : 0
     }
     static var horizontalPadding: CGFloat { 10 * PanelMetrics.scale }
+    /// Balances the housing above the rings without moving the rings themselves.
+    static var notchBottomPadding: CGFloat { 12 * PanelMetrics.scale }
 
     static var ringDiameter: CGFloat { 36 * PanelMetrics.scale }
     static var ringLineWidth: CGFloat { 4 * PanelMetrics.scale }
@@ -379,6 +381,7 @@ struct UsageDockView: View {
     var isDocked: Bool = true
     /// Open, or wound down to the sliver.
     var isExpanded: Bool = true
+    var notchSize: CGSize?
     /// Colours the sliver when a limit is close enough that hiding the rail
     /// would be hiding something worth seeing.
     var alert: Color?
@@ -422,6 +425,8 @@ struct UsageDockView: View {
                 )
         }
         .frame(width: railSize.width, height: railSize.height)
+        .allowsHitTesting(notchSize == nil || isExpanded)
+        .accessibilityHidden(notchSize != nil && !isExpanded)
         // No drag handle lives here any more. A press only reaches a view
         // inside `NSHostingView` if SwiftUI claims it first, and it would not
         // claim the empty black between the rings: the berth opts out of hit
@@ -437,7 +442,23 @@ struct UsageDockView: View {
         .accessibilityLabel(String.localized("Provider usage selector"))
     }
 
+    @ViewBuilder
     private var berth: some View {
+        if let notchSize {
+            let surface = PanelHitArea.notchSurface(rail: CGRect(origin: .zero, size: railSize), notchSize: notchSize)
+            PanelSurface(
+                shape: NotchBerthShape(notchSize: notchSize, openness: isExpanded ? 1 : 0),
+                usesGlass: usesGlass
+            )
+            .frame(width: surface.width, height: surface.height)
+            .offset(y: surface.minY)
+            .frame(width: railSize.width, height: railSize.height, alignment: .top)
+        } else {
+            ordinaryBerth
+        }
+    }
+
+    private var ordinaryBerth: some View {
         let shape = DockBerthShape(edge: edge, isDocked: isDocked, openness: isExpanded ? 1 : 0)
 
         return PanelSurface(
