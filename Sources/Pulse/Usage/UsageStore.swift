@@ -34,6 +34,7 @@ final class UsageStore {
     private let alerts: UsageAlerts?
     private let appServer = CodexAppServer()
     private let codex: CodexUsageService
+    private let kiro = KiroUsageService()
     private let claudeCode = ClaudeCodeUsageService()
     private let antigravity = AntigravityUsageService()
     private let grok = GrokUsageService()
@@ -446,12 +447,15 @@ final class UsageStore {
         // blind to any of them.
         let extras = settings.shownAccounts.filter { !$0.isPrimary }
 
-        Task { [codex, claudeCode, antigravity, cursor, grok, grokBot] in
+        Task { [codex, kiro, claudeCode, antigravity, cursor, grok, grokBot] in
             // Independent, so they run side by side rather than one waiting on
             // another's round trip.
             async let codexUsage = wanted.contains(.codex)
                 ? await codex.fetch(source: codexSource)
                 : ProviderUsage.unavailable(.codex, reason: .loading)
+            async let kiroUsage = wanted.contains(.kiro)
+                ? await kiro.fetch()
+                : ProviderUsage.unavailable(.kiro, reason: .loading)
             async let claudeUsage = wanted.contains(.claudeCode)
                 ? await claudeCode.fetch(source: claudeSource)
                 : ProviderUsage.unavailable(.claudeCode, reason: .loading)
@@ -507,8 +511,8 @@ final class UsageStore {
                 ? await devin.fetch(source: devinSource)
                 : ProviderUsage.unavailable(.devin, reason: .loading)
 
-            let (rawCodex, rawClaude, rawAntigravity, rawOpenCode) =
-                await (codexUsage, claudeUsage, antigravityUsage, openCodeUsage)
+            let (rawCodex, rawKiro, rawClaude, rawAntigravity, rawOpenCode) =
+                await (codexUsage, kiroUsage, claudeUsage, antigravityUsage, openCodeUsage)
             let (rawKimi, rawCursor, rawOllama) = await (kimiUsage, cursorUsage, ollamaUsage)
             let (rawZai, rawGLM) = await (zaiUsage, glmUsage)
             let (rawMiniMax, rawMiniMaxCN) = await (minimaxUsage, minimaxCNUsage)
@@ -538,6 +542,7 @@ final class UsageStore {
             var results: [BatchResult] = []
             for (provider, raw) in [
                 (Provider.codex, rawCodex),
+                (.kiro, rawKiro),
                 (.claudeCode, rawClaude),
                 (.antigravity, rawAntigravity),
                 (.openCodeGo, rawOpenCode),
@@ -675,6 +680,8 @@ final class UsageStore {
             switch provider {
             case .codex:
                 raw = await codex.fetch(source: source)
+            case .kiro:
+                raw = await kiro.fetch()
             case .claudeCode:
                 raw = await claudeCode.fetch(source: source)
             case .antigravity:
@@ -777,7 +784,7 @@ final class UsageStore {
         case .grok: await grok.fetch(account: account, token: credentials.accessToken)
         case .grokBot: await grokBot.fetch(account: account, token: credentials.accessToken)
         // Nothing else can be signed in to, so nothing else gets here.
-        case .antigravity, .cursor, .openCodeGo, .kimiCode, .ollamaCloud,
+        case .kiro, .antigravity, .cursor, .openCodeGo, .kimiCode, .ollamaCloud,
              .zai, .glmCoding, .minimax, .minimaxCN, .copilot, .volcengine,
              .commandCode, .deepSeek, .devin, .xiaomiMiMo:
             .unavailable(account, reason: .loading)
