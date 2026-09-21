@@ -40,7 +40,9 @@ struct NotchGeometryTests {
             let surface = PanelHitArea.notchSurface(rail: localRail, notchSize: notch.size)
             #expect(surface.minY == 0)
             #expect(surface.contains(localRail))
-            #expect(surface.maxY == localRail.maxY + DockLayout.notchBottomPadding)
+            // The rail ends the surface: the housing sits above the rings,
+            // and nothing is added under them to answer it.
+            #expect(surface.maxY == localRail.maxY)
             #expect(surface.width >= notch.width)
             #expect(panel.width >= surface.width)
             #expect(layout.frame.size == panel)
@@ -59,7 +61,7 @@ struct NotchGeometryTests {
         #expect(layout.frame.maxY == screen.maxY)
     }
 
-    @Test("Notch padding preserves ring positions and reserves the full detail-card budget at every scale", arguments: [false, true])
+    @Test("The housing costs its own height and nothing else, at every scale", arguments: [false, true])
     func paddingBudget(roundEnds: Bool) {
         let previousEnds = PanelMetrics.usesRoundEnds
         PanelMetrics.useRoundEnds(roundEnds)
@@ -77,12 +79,12 @@ struct NotchGeometryTests {
                 let railSize = DockLayout.size(for: 6, on: .horizontal)
                 let rail = CGRect(x: 100, y: notch.height, width: railSize.width, height: railSize.height)
                 let surface = PanelHitArea.notchSurface(rail: rail, notchSize: notch.size)
-                #expect(abs(surface.maxY - rail.maxY - 12 * size.scale) < 0.01)
+                #expect(surface.maxY == rail.maxY)
                 #expect(surface.minY == 0)
                 #expect(surface.midX == rail.midX)
                 let ordinary = FloatingPanelController.Layout.size(for: .top)
                 let attached = FloatingPanelController.Layout.size(for: .top, notchSize: notch.size)
-                #expect(abs(attached.height - ordinary.height - notch.height - 12 * size.scale) < 0.01)
+                #expect(abs(attached.height - ordinary.height - notch.height) < 0.01)
                 let cardTop = surface.maxY + DetailCardLayout.horizontalGap
                 #expect(abs(attached.height - cardTop - DetailCardLayout.pointerWidth - DetailCardLayout.maximumHeight) < 0.01)
                 // The old window budgets remain intact away from a notch.
@@ -96,11 +98,18 @@ struct NotchGeometryTests {
         }
     }
 
-    @Test("The collapsed surface is empty; the expanded rectangle has straight sides from the screen top")
+    /// What the view and the hit test hand the shape: the surface plus the
+    /// room the fillets sweep into at the screen edge.
+    private func drawn(_ rail: CGSize) -> CGRect {
+        PanelHitArea.notchSurface(rail: CGRect(origin: .zero, size: rail), notchSize: notch.size)
+            .insetBy(dx: -DockLayout.flareWidth, dy: 0)
+    }
+
+    @Test("The collapsed surface is empty; the expanded one is filled to the screen top")
     func silhouette() {
         for count in [1, 6, 12] {
             let rail = DockLayout.size(for: count, on: .horizontal)
-            let rect = PanelHitArea.notchSurface(rail: CGRect(origin: .zero, size: rail), notchSize: notch.size)
+            let rect = drawn(rail)
             #expect(NotchBerthShape(notchSize: notch.size, openness: 0).path(in: rect).isEmpty)
             for progress in [0.1, 0.5, 1.0] {
                 let path = NotchBerthShape(notchSize: notch.size, openness: progress).path(in: rect)
@@ -109,11 +118,38 @@ struct NotchGeometryTests {
                 #expect(path.boundingRect.width <= rect.width + 0.01)
                 let top = -notch.height + 0.001
                 #expect(path.contains(CGPoint(x: rect.midX, y: top)))
-                // The old neck and flared shoulder failed here: these pixels
+                // The old neck and flared shoulder failed here: the pixels
                 // beside the housing must be filled all the way to the top.
                 #expect(path.contains(CGPoint(x: path.boundingRect.minX + 1, y: top)))
                 #expect(path.contains(CGPoint(x: path.boundingRect.maxX - 1, y: top)))
             }
+        }
+    }
+
+    /// The fillet into the screen edge, which a rail that is not on a notch
+    /// has always had. Losing it leaves two square corners against the top of
+    /// the screen — nothing fails, the rail just stops looking like the rail.
+    @Test("The surface sweeps out into the screen edge instead of meeting it square", arguments: [false, true])
+    func filletsReachTheScreenEdge(roundEnds: Bool) {
+        let previousEnds = PanelMetrics.usesRoundEnds
+        PanelMetrics.useRoundEnds(roundEnds)
+        defer { PanelMetrics.useRoundEnds(previousEnds) }
+
+        for count in [1, 6, 12] {
+            let rect = drawn(DockLayout.size(for: count, on: .horizontal))
+            let path = NotchBerthShape(notchSize: notch.size).path(in: rect)
+            let top = rect.minY
+            let body = rect.insetBy(dx: DockLayout.flareWidth, dy: 0)
+
+            // Wider at the screen edge than at the body, by the whole flare.
+            #expect(abs(path.boundingRect.width - body.width - DockLayout.flareWidth * 2) < 0.01)
+
+            // Concave, not a chamfer: at the body's own edge the fillet has
+            // already left the screen edge, so a point just outside the body
+            // is filled at the very top and empty further down.
+            let outside = body.minX - 1
+            #expect(path.contains(CGPoint(x: outside, y: top + 0.5)))
+            #expect(!path.contains(CGPoint(x: outside, y: top + DockLayout.flareHeight + 1)))
         }
     }
 
@@ -124,8 +160,7 @@ struct NotchGeometryTests {
         defer { PanelMetrics.useRoundEnds(previousEnds) }
         for count in [1, 2, 6, 12] {
             let rail = DockLayout.size(for: count, on: .horizontal)
-            let path = NotchBerthShape(notchSize: notch.size).path(in:
-                PanelHitArea.notchSurface(rail: CGRect(origin: .zero, size: rail), notchSize: notch.size))
+            let path = NotchBerthShape(notchSize: notch.size).path(in: drawn(rail))
             for index in 0..<count {
                 let x = DockLayout.firstRingAlong(on: .horizontal)
                     + CGFloat(index) * DockLayout.ringStep(on: .horizontal)

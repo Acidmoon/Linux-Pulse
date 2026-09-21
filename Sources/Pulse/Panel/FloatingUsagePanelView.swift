@@ -595,8 +595,9 @@ struct FloatingUsagePanelView: View {
 
         let rail = PanelHitArea.rail(edge: edge, railSize: railSize, railTop: railTop, railLeading: railLeading)
         if let notch = placement.notch {
+            let surface = PanelHitArea.notchSurface(rail: rail, notchSize: notch.size)
             if NotchBerthShape(notchSize: notch.size)
-                .path(in: PanelHitArea.notchSurface(rail: rail, notchSize: notch.size)).contains(point) { return true }
+                .path(in: surface.insetBy(dx: -DockLayout.flareWidth, dy: 0)).contains(point) { return true }
         }
         if rail.contains(point) { return true }
 
@@ -646,10 +647,19 @@ enum PanelHitArea {
 
     /// The surface extends up to the physical screen top and is at least as
     /// wide as the housing, even when the rail only has one ring.
+    ///
+    /// No padding is added under the rail. The housing above the rings is the
+    /// screen's own bezel, not room this panel chose, and matching it would
+    /// mean 38pt of black under a 36pt ring: the rail keeps the symmetric
+    /// padding it has everywhere else and the housing simply sits on top.
+    ///
+    /// The body alone — `NotchBerthShape` sweeps `DockLayout.flareWidth`
+    /// further out at the screen edge, and the grab area deliberately does not
+    /// follow it there.
     static func notchSurface(rail: CGRect, notchSize: CGSize) -> CGRect {
         let width = max(rail.width, notchSize.width)
         return CGRect(x: rail.midX - width / 2, y: rail.minY - notchSize.height,
-                      width: width, height: rail.height + notchSize.height + DockLayout.notchBottomPadding)
+                      width: width, height: rail.height + notchSize.height)
     }
 
     /// The rail's rectangle inside the panel, in the panel's top-left space.

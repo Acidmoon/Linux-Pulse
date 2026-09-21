@@ -42,8 +42,6 @@ enum DockLayout {
         PanelMetrics.usesRoundEnds ? 8 * PanelMetrics.scale : 0
     }
     static var horizontalPadding: CGFloat { 10 * PanelMetrics.scale }
-    /// Balances the housing above the rings without moving the rings themselves.
-    static var notchBottomPadding: CGFloat { 12 * PanelMetrics.scale }
 
     static var ringDiameter: CGFloat { 36 * PanelMetrics.scale }
     static var ringLineWidth: CGFloat { 4 * PanelMetrics.scale }
@@ -450,7 +448,9 @@ struct UsageDockView: View {
                 shape: NotchBerthShape(notchSize: notchSize, openness: isExpanded ? 1 : 0),
                 usesGlass: usesGlass
             )
-            .frame(width: surface.width, height: surface.height)
+            // Wider than the surface by the room the fillets sweep into at
+            // the screen edge; the shape insets that back off for the body.
+            .frame(width: surface.width + DockLayout.flareWidth * 2, height: surface.height)
             .offset(y: surface.minY)
             .frame(width: railSize.width, height: railSize.height, alignment: .top)
         } else {
