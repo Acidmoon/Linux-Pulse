@@ -1,12 +1,15 @@
-// The macOS UI. Excluded from the Linux build rather than ported: this file
-// is SwiftUI/AppKit presentation, and the Linux panel is drawn by a separate
-// GTK4 process (see Docs/linux/migration-assessment.md). The guard is the
-// module the file actually imports, so a file that only needs SwiftUI is not
-// asking for AppKit.
-// pulse-linux: excluded
+// Upstream's own code. The only change is that the imports are conditional:
+// nothing in the body below depends on macOS, only on the *names* it spells its
+// points, paths and colours with, and `Platform/DrawingCompat.swift` supplies
+// those under Linux. Measured, not assumed — this file has no `body`, no
+// `some View` and no `@State`.
+// pulse-linux: reused
 #if canImport(AppKit)
 import AppKit
+#endif
+#if canImport(SwiftUI)
 import SwiftUI
+#endif
 
 /// What colour a provider's bot mark is drawn in.
 ///
@@ -171,8 +174,8 @@ enum BotMarkTint {
     }
 
     private static func hue(of colour: Color) -> Double {
-        guard let base = NSColor(colour).usingColorSpace(.sRGB) else { return 0 }
-        return Double(base.hueComponent) * 360
+        guard let base = colour.reading else { return 0 }
+        return base.hue
     }
 
     /// The nth dealt colour: an even hue, levelled to one brightness.
@@ -225,19 +228,18 @@ enum BotMarkTint {
     private static func lifted(_ colour: Color) -> Color {
         let value = luminance(of: colour)
         guard value < luminanceFloor, value.isFinite else { return colour }
-        guard let base = NSColor(colour).usingColorSpace(.sRGB) else { return colour }
+        guard let base = colour.reading else { return colour }
         // Enough of the way to white to clear the floor, and no further.
         let amount = min(1, (luminanceFloor - value) / max(1 - value, 0.0001))
-        return Color(red: BotMath.mix(base.redComponent, 1, amount),
-                     green: BotMath.mix(base.greenComponent, 1, amount),
-                     blue: BotMath.mix(base.blueComponent, 1, amount))
+        return Color(red: BotMath.mix(base.red, 1, amount),
+                     green: BotMath.mix(base.green, 1, amount),
+                     blue: BotMath.mix(base.blue, 1, amount))
     }
 
     private static func luminance(of colour: Color) -> Double {
-        guard let base = NSColor(colour).usingColorSpace(.sRGB) else { return 1 }
-        return 0.2126 * base.redComponent
-            + 0.7152 * base.greenComponent
-            + 0.0722 * base.blueComponent
+        guard let base = colour.reading else { return 1 }
+        return 0.2126 * base.red
+            + 0.7152 * base.green
+            + 0.0722 * base.blue
     }
 }
-#endif

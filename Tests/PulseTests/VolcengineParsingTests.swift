@@ -191,6 +191,15 @@ struct VolcengineParsingTests {
 struct VolcengineProcessTests {
     private static let shell = URL(fileURLWithPath: "/bin/sh")
 
+    /// **The deadline is a hang guard, not a throughput assertion.** It was 20
+    /// seconds, which is generous for a megabyte through a pipe on an idle
+    /// machine and is not generous on one running four CPU-bound animation
+    /// tests alongside it — the child then misses the deadline and the test
+    /// reports `.unreachable`, which reads as a broken runner rather than as a
+    /// busy host. What is being tested is that a flood does not deadlock, so
+    /// the deadline only has to be long enough that reaching it means a hang.
+    private static let hangGuard: TimeInterval = 60
+
     @Test("A child that floods stderr does not deadlock")
     func stderrFloodDoesNotDeadlock() async throws {
         // A pipe buffer is 64 KiB. Reading stdout to EOF *before* touching
@@ -199,7 +208,7 @@ struct VolcengineProcessTests {
         let result = await VolcengineUsageService.run(
             Self.shell,
             ["-c", "yes ERROR | head -c 1048576 >&2; printf '{\"items\":[]}'"],
-            deadline: 20
+            deadline: Self.hangGuard
         )
 
         let data = try result.get()
@@ -211,7 +220,7 @@ struct VolcengineProcessTests {
         let result = await VolcengineUsageService.run(
             Self.shell,
             ["-c", "yes PADDING | head -c 4194304"],
-            deadline: 20
+            deadline: Self.hangGuard
         )
 
         let data = try result.get()

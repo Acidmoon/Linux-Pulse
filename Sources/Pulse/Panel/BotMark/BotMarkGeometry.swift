@@ -1,11 +1,12 @@
-// The macOS UI. Excluded from the Linux build rather than ported: this file
-// is SwiftUI/AppKit presentation, and the Linux panel is drawn by a separate
-// GTK4 process (see Docs/linux/migration-assessment.md). The guard is the
-// module the file actually imports, so a file that only needs SwiftUI is not
-// asking for AppKit.
-// pulse-linux: excluded
+// Upstream's own code. The only change is that the imports are conditional:
+// nothing in the body below depends on macOS, only on the *names* it spells its
+// points, paths and colours with, and `Platform/DrawingCompat.swift` supplies
+// those under Linux. Measured, not assumed — this file has no `body`, no
+// `some View` and no `@State`.
+// pulse-linux: reused
 #if canImport(CoreGraphics)
 import CoreGraphics
+#endif
 import Foundation
 
 /// Ports of the upstream `geometry.js` helpers. Same formulas, same
@@ -172,4 +173,3 @@ enum BotMarkGeometry {
         return shape.ring
     }
 }
-#endif

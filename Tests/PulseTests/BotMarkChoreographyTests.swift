@@ -1,10 +1,22 @@
-// The macOS UI. Excluded from the Linux build with the code it tests — see
-// Docs/linux/migration-assessment.md.
-// pulse-linux: excluded
+// Upstream's own tests. Enabled on Linux along with the code they test: the
+// BotMark animation is upstream's source with only its imports made
+// conditional, so upstream's assertions about it are worth exactly as much
+// here as they are on a Mac — and far more than anything written alongside the
+// port, which would be checking the port against itself.
+// pulse-linux: reused
+
+// `SwiftUI` re-exports `Foundation` on a Mac. On Linux this stands in,
+// which is why `Date`, `Calendar` and `ProcessInfo` above resolve.
+import Foundation
+
 #if canImport(AppKit)
 import AppKit
+#endif
+#if canImport(SwiftUI)
 import SwiftUI
+#endif
 import Testing
+
 @testable import Pulse
 
 @Suite("Bot mark choreography")
@@ -249,6 +261,10 @@ struct BotMarkChoreographyTests {
         #expect(seen == Set(pool))
     }
 
+#if canImport(SwiftUI)
+// The contact sheet is a SwiftUI contact sheet: it lays poses out in a
+// VStack and rasterises them through `ImageRenderer`. Only the sheet is
+// gated — every assertion above it is upstream's and runs on Linux.
     /// Optional contact sheet using the production Canvas drawing. It is a
     /// local render, not evidence of AppKit input or a running panel.
     @Test(.enabled(if: ProcessInfo.processInfo.environment["PULSE_BOT_PREVIEW"] != nil))
@@ -308,6 +324,7 @@ struct BotMarkChoreographyTests {
         let png = try #require(NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]))
         try png.write(to: URL(fileURLWithPath: destination))
     }
+#endif
 
     private struct PoseRow: Identifiable {
         let id: String
@@ -321,4 +338,3 @@ struct BotMarkChoreographyTests {
         let config: BotMarkConfig
     }
 }
-#endif

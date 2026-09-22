@@ -1,9 +1,13 @@
-// The macOS UI. Excluded from the Linux build with the code it tests — the
-// BotMark animation is drawn by SwiftUI. See Docs/linux/migration-assessment.md.
-// pulse-linux: excluded
-#if canImport(AppKit)
+// Upstream's own tests. Enabled on Linux along with the code they test: the
+// BotMark animation is upstream's source with only its imports made
+// conditional, so upstream's assertions about it are worth exactly as much
+// here as they are on a Mac — and far more than anything written alongside the
+// port, which would be checking the port against itself.
+// pulse-linux: reused
+
 import Foundation
 import Testing
+
 @testable import Pulse
 
 /// The actual playlist/timing the view uses, rather than a hand-built single
@@ -150,4 +154,3 @@ struct BotMarkRestTests {
         #expect(BotMarkMood.unavailable.upstreamState == "confused")
     }
 }
-#endif

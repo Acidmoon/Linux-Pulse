@@ -20,3 +20,4 @@ A decision records a reason, not proof the measurement still holds — a local p
 | [linux-subprocess.md](linux-subprocess.md) | [../linux/subprocess.md](../linux/subprocess.md) |
 
 When the *reason* changes, edit the decision. When only the current fact changes (counts, intervals), edit the topic doc.
+- [linux-panel.md](linux-panel.md) — why the panel's own code is reused rather than rewritten, what the shim has to supply, and the transform bug upstream's tests caught.

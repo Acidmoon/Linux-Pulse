@@ -1,9 +1,19 @@
-// The macOS UI. Excluded from the Linux build with the code it tests — see
-// Docs/linux/migration-assessment.md.
-// pulse-linux: excluded
+// Upstream's own tests. Enabled on Linux along with the code they test: the
+// BotMark animation is upstream's source with only its imports made
+// conditional, so upstream's assertions about it are worth exactly as much
+// here as they are on a Mac — and far more than anything written alongside the
+// port, which would be checking the port against itself.
+// pulse-linux: reused
+
+// `SwiftUI` re-exports `Foundation` on a Mac. On Linux this stands in, which
+// is why `Calendar`, `TimeZone` and `DateComponents` below resolve.
+import Foundation
+
 #if canImport(SwiftUI)
 import SwiftUI
+#endif
 import Testing
+
 @testable import Pulse
 
 /// The animated mark: what it says, and whether it can be seen saying it.
@@ -167,10 +177,13 @@ struct BotMarkTests {
     /// A black brand keeps its hue when it is lifted — the point is to make it
     /// visible, not to turn every dark mark into the same grey.
     @Test("Lifting a dark colour keeps its hue")
-    func liftKeepsHue() {
+    func liftKeepsHue() throws {
         let body = BotMarkTint.body(for: .deepSeek)
-        let colour = NSColor(body).usingColorSpace(.sRGB)!
-        #expect(colour.blueComponent > colour.redComponent)
+        // Upstream asks `NSColor` for the components here. `reading` is the
+        // same question — it goes through `NSColor` on a Mac — so the assertion
+        // is unchanged and now runs on both.
+        let colour = try #require(body.reading)
+        #expect(colour.blue > colour.red)
     }
 
     /// A persona may change how a mood is said, never what it says. This is
@@ -841,8 +854,8 @@ struct BotMarkTests {
     }
 
     private static func hue(of colour: Color) -> Double {
-        guard let base = NSColor(colour).usingColorSpace(.sRGB) else { return 0 }
-        return Double(base.hueComponent) * 360
+        guard let base = colour.reading else { return 0 }
+        return base.hue
     }
 
     /// The shorter way round the colour wheel.
@@ -852,10 +865,9 @@ struct BotMarkTests {
     }
 
     private static func luminance(of colour: Color) -> Double {
-        guard let base = NSColor(colour).usingColorSpace(.sRGB) else { return 1 }
-        return 0.2126 * base.redComponent
-            + 0.7152 * base.greenComponent
-            + 0.0722 * base.blueComponent
+        guard let base = colour.reading else { return 1 }
+        return 0.2126 * base.red
+            + 0.7152 * base.green
+            + 0.0722 * base.blue
     }
 }
-#endif

@@ -1,3 +1,8 @@
+// Upstream's own code, with the imports made conditional and nothing else
+// changed. The arithmetic in this file has no macOS dependency — only the
+// names it spells its points, paths and colours with — so `DrawingCompat.swift`
+// supplies those under Linux and the body below merges upstream unchanged.
+// pulse-linux: reused
 import Foundation
 
 /// A single spring-damper value, integrated at a fixed step.
