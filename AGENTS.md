@@ -97,3 +97,25 @@ PATH   : 已写入 ~/.bashrc 的 "Swift 6.4 toolchain" 段（新交互 shell 生
 - `libsqlite3-dev`（`/usr/include/sqlite3.h`）缺失，且本机 `sudo` 需要密码 → **需要用户执行**：
   `sudo apt install libsqlite3-dev`（另有 `libcurl4-openssl-dev`、`libxml2-dev`、`libedit-dev`、`clang` 视情况）
 - 全库**当前零条件编译**（`Sources/` + `Tests/` 中 `#if canImport` / `#if os(` 出现 0 次），即现状完全无法在 Linux 编译
+
+### Linux 构建的两个坑（实测 2026-09-22）
+
+**1. swift-crypto 需要 C++ 头文件。** CryptoKit 的 Linux 替代 swift-crypto 内嵌 BoringSSL，编译它需要 `<memory>`。
+本机装了 `gcc-13` + `libgcc-13-dev` 但**没装** `libstdc++-13-dev`，于是工具链的 clang 挑中 GCC 13、去找
+`/usr/include/c++/13/`，不存在 → `fatal error: 'memory' file not found`。
+
+永久修复（需要 sudo）：
+
+```bash
+sudo apt install g++-13          # 或 libstdc++-13-dev
+```
+
+临时绕过（不改仓库、已验证可用）：
+
+```bash
+swift build -Xcc --gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/12
+```
+
+**2. `swift build` 的批量编译会「涓流」报错。** Swift 的批量编译模式在第一个模块错误处就中止该批次，
+所以一次 `swift build` 只会暴露一小撮 `no such module 'X'`，不能用来枚举完整工作队列。
+枚举要靠在全树 `grep` import，或用 `swiftc -typecheck` 逐文件跑。
