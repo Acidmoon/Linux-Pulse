@@ -27,3 +27,14 @@ Integrations/raycast/raycast-env.d.ts
 # IDEs
 .idea/
 .vscode/
+
+# Linux packaging output (see packaging/linux)
+dist/
+*.deb
+*.rpm
+*.AppImage
+*.tar.gz
+
+# Local build helper state
+.cache/
+compile_commands.json
