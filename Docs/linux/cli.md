@@ -55,6 +55,28 @@ Pulse: 0 of 2 answered in 0.4s.
 
 读缓存并打印，**从不取数**。完整契约见上游文档。要在无头环境看到数字，先跑 `--refresh`。
 
+## `pulse --set-key <provider>` / `--clear-key <provider>`
+
+**key 从 stdin 读，永远不作为命令行参数。** 参数对机器上每个用户都在 `ps` 里可见，且默认会写进 shell 历史；
+`gh auth login --with-token` 出于同样理由从 stdin 读，这个命令沿用它的形状。
+
+```bash
+pulse --set-key kimiCode
+<paste, then Enter>
+```
+
+**key 本身不回显。** 命令只报告是哪个 provider、有没有落盘。它写进 `keys.dat`，用本机标识符封存。
+
+存 key 的同时会**把该 provider 打开**——一条没有任何东西去问的 key 等于不存在，
+而这是本命令唯一一处改设置而非存密钥的地方，所以它会明说。
+
+11 个 provider 接受粘贴的 key（Kimi Code、DeepSeek、MiniMax、MiniMax CN、z.ai、GLM Coding Plan、
+OpenCode Go、Command Code、Volcengine、Devin、Ollama Cloud 的会话 cookie）。
+不接受的那些会**明确说明理由**而不是静默失败——Copilot 是 GitHub 设备登录，
+Cursor / Grok Bot / Devin 读的是别的程序存的登录，Antigravity / Kiro 读的是必须正在运行的 helper。
+
+退出码：0 成功；1 空 key 或写入失败；2 provider 缺失、名字写错、或该 provider 不接受 key。
+
 ## 无头登录：目前不存在
 
 **这是当前阶段一的真实缺口，不是待办的口头承诺。**

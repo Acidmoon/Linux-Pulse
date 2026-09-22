@@ -63,6 +63,14 @@ enum PulseLinuxMain {
             exit(await UsageRefresh.run())
         }
 
+        // Before `LegacyDefaults.migrateIfNeeded()`, like the others: these are
+        // commands, not a launch, and the one thing they must not do is decide
+        // an installation's defaults on the way past.
+        for argument in [KeyCommand.setArgument, KeyCommand.clearArgument]
+        where CommandLine.arguments.contains(argument) {
+            exit(KeyCommand.run(argument: argument))
+        }
+
         LegacyDefaults.migrateIfNeeded()
 
         // No panel to open yet, so say so rather than exiting silently. A
@@ -80,6 +88,8 @@ enum PulseLinuxMain {
 
           --json                 print the last readings, one account each
           --refresh              ask every enabled provider once, then exit
+          --set-key <provider>   read a key from stdin and store it, sealed
+          --clear-key <provider> remove a stored key
           --statusline           Claude Code status line mode (reads stdin)
           --install-statusline   register this binary as Claude Code's status line
           --uninstall-statusline undo that
@@ -87,6 +97,9 @@ enum PulseLinuxMain {
         \(UsageRefresh.modeArgument) fills the cache and \(UsageReport.modeArgument) reads it. Both
         work with no display; \(UsageReport.modeArgument) on its own never fetches, so
         the figures it prints are as old as the last \(UsageRefresh.modeArgument).
+
+        \(KeyCommand.setArgument) takes its key on stdin, never as an argument, so it
+        does not reach `ps` or your shell history.
 
         """
     }
