@@ -246,7 +246,12 @@ struct KimiCodeUsageService: Sendable {
 
     // MARK: - Reading the reply
 
-    private struct Reply: Decodable {
+    /// Not `private`: `KimiUsageTests` decodes a captured reply and drives
+    /// `windows(from:)` with it, the same way `UsageReport.encode` is reachable
+    /// for its own tests. **The reply's shape is the thing that changed
+    /// underneath this provider**, so the shape is what needs a test — and a
+    /// test cannot write that fixture by hand from the code it is checking.
+    struct Reply: Decodable {
         struct Detail: Decodable {
             let limit: String?
             let used: String?
@@ -264,15 +269,64 @@ struct KimiCodeUsageService: Sendable {
             let detail: Detail?
         }
 
+        /// One entry of `usages`: a window named by the service, carrying a
+        /// ratio rather than a limit and a used count.
+        struct Ratio: Decodable {
+            let usedRatio: Double?
+            let resetTime: String?
+
+            enum CodingKeys: String, CodingKey {
+                case usedRatio = "used_ratio"
+                case resetTime = "reset_time"
+            }
+        }
+
         struct Membership: Decodable { let level: String? }
         struct User: Decodable { let membership: Membership? }
 
         let user: User?
         let usage: Detail?
         let limits: [Limit]?
+        /// **The live shape, and not the same thing as `usage` above.**
+        ///
+        /// Measured against a real account on 2026-09-23: the reply carried
+        /// `usages` and no `usage` at all, so this map is the only place the
+        /// monthly limits appeared — and nothing was reading it. The singular
+        /// field is kept because it is what the endpoint was documented to
+        /// send and may still be sent to other plans; losing it would be a
+        /// silent regression for anyone it does apply to.
+        let usages: [String: Ratio]?
     }
 
-    private static func windows(from reply: Reply) -> [UsageWindow] {
+    /// The `usages` keys this understands, and what each stands for.
+    ///
+    /// A table rather than a parse of the name. `limit_5h` reads as five hours,
+    /// but `limit_month_total` and `limit_month_code` name no length at all —
+    /// a calendar month is not a number of seconds — and a rule that turned
+    /// these names into durations would be guessing at a vocabulary that has
+    /// already changed once. **An unlisted key is dropped**, which is the same
+    /// rule the windows' own `timeUnit` follows.
+    ///
+    /// The month is 30 days because that is the convention already in use for
+    /// a calendar month elsewhere in Pulse (Cursor's 28–31 day billing cycle,
+    /// Copilot's). It is a **sort key, not a reported length**: the reply does
+    /// not state one, so `reportsLength` is false and the number is never
+    /// displayed.
+    ///
+    /// The `scope` is the service's own token with the shared prefix removed
+    /// rather than a written name. `month_total` and `month_code` are not
+    /// product names and what they mean is not stated anywhere in the reply —
+    /// **the card shows the vocabulary it was given rather than one invented
+    /// for it.** See `Docs/providers/kimi-code.md`.
+    private static let ratioWindows: [(key: String, seconds: Int, kind: UsageWindow.Kind, scope: String?)] = [
+        ("limit_5h", 5 * 3_600, .fiveHour, nil),
+        ("limit_month_total", 30 * 86_400, .monthly, "month_total"),
+        ("limit_month_code", 30 * 86_400, .monthly, "month_code"),
+    ]
+
+    /// The reply's worth of windows, in one pure function so it can be driven
+    /// from a captured response. Not `private` for `KimiUsageTests`.
+    static func windows(from reply: Reply) -> [UsageWindow] {
         var found: [UsageWindow] = []
 
         // The timed windows first, named by the length the service states.
@@ -299,6 +353,40 @@ struct KimiCodeUsageService: Sendable {
         if let weekly = window(from: reply.usage, id: "weekly", kind: .weekly,
                                seconds: 7 * 86_400, reportsLength: false) {
             found.append(weekly)
+        }
+
+        // Then the ratio-shaped map the live endpoint sends.
+        //
+        // **A length already accounted for is skipped.** `limit_5h` states the
+        // same window `limits[]` already stated — the same reset time, the same
+        // allowance, once as counts and once as a ratio — and adding it would
+        // draw the five-hour limit twice. The comparison is by length, which is
+        // what the key and the `limits[]` entry agree on; nothing else in the
+        // reply is common to both.
+        // Deliberately not added to as the loop runs. The two monthly windows
+        // share one sort key — a calendar month each, and the reply states no
+        // length for either — so a set that grew would let the first of them
+        // suppress the second. Same-length windows are ordinary here; the ids
+        // are what tell them apart, which is why they come from the keys.
+        let lengthsSoFar = Set(found.map(\.windowSeconds))
+        for known in Self.ratioWindows {
+            guard
+                let entry = reply.usages?[known.key],
+                let ratio = entry.usedRatio,
+                !lengthsSoFar.contains(known.seconds)
+            else { continue }
+
+            found.append(UsageWindow(
+                id: known.key,
+                kind: known.kind,
+                scope: known.scope,
+                // Already a fraction, and computed by the service rather than
+                // inferred here — so this is not an estimate.
+                usedFraction: min(max(ratio, 0), 1),
+                windowSeconds: known.seconds,
+                resetsAt: entry.resetTime.flatMap(Self.date(from:)),
+                reportsLength: false
+            ))
         }
 
         return found.sorted { $0.windowSeconds < $1.windowSeconds }
