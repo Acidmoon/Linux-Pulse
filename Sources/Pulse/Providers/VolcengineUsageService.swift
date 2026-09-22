@@ -1,4 +1,10 @@
 import Foundation
+#if canImport(Glibc)
+// `poll`, `read`, `kill` and the signal numbers are used below. On Darwin
+// Foundation re-exports these through Darwin; on Linux it does not, so the
+// module is named outright.
+import Glibc
+#endif
 #if canImport(FoundationNetworking)
 // On Linux, URLSession and friends live in this separate module. On
 // Darwin it does not exist and Foundation already re-exports them, so
@@ -256,6 +262,8 @@ struct VolcengineUsageService: Sendable {
 
         let collected = Collected()
         let readers = DispatchGroup()
+
+        #if canImport(Darwin)
         for (pipe, isStandardOutput) in [(out, true), (err, false)] {
             readers.enter()
             // **A handler, not a blocking read loop.** A loop parks a thread
@@ -283,6 +291,61 @@ struct VolcengineUsageService: Sendable {
             out.fileHandleForReading.readabilityHandler = nil
             err.fileHandleForReading.readabilityHandler = nil
         }
+        #else
+        // **Not `readabilityHandler`, which does not work here.** Measured on
+        // this platform: with a child writing more than a pipe buffer, the
+        // descriptor carrying the bulk never delivers EOF through a
+        // readability handler — the other one does, immediately, so the read
+        // group waits out the whole deadline on a process that has already
+        // exited. It is a race, so which of the two pipes stalls changes run
+        // to run, and one run ended in a crash inside `_dispatch_event_loop_drain`.
+        // The same pipeline through a blocking read returns in 0.01s, every
+        // time, which is why this is a poll loop instead.
+        //
+        // `poll` with a slice rather than a bare `read`: a grandchild can hold
+        // a write end open after this call has given up, and a blocking read
+        // would park a thread on it for the life of the process. The slice lets
+        // the loop notice `releasePipes` and leave, so no thread outlives the
+        // call and nothing is stranded — the property the handler was chosen
+        // for, reached a different way.
+        let abandoned = Abandoned()
+        let pipeQueue = DispatchQueue(
+            label: "com.pulse.volcengine.pipes",
+            attributes: .concurrent
+        )
+
+        for (pipe, isStandardOutput) in [(out, true), (err, false)] {
+            readers.enter()
+            let descriptor = pipe.fileHandleForReading.fileDescriptor
+            pipeQueue.async {
+                defer { readers.leave() }
+                var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+                while !abandoned.isSet {
+                    var interest = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+                    let ready = poll(&interest, 1, 200)
+                    // A negative return is an error and a zero return is the
+                    // slice expiring; neither is EOF, so both go round again
+                    // until the descriptor speaks or the call gives up.
+                    guard ready > 0 else { continue }
+                    let count = read(descriptor, &buffer, buffer.count)
+                    // 0 is EOF; negative is an error. Either way this pipe has
+                    // nothing more to say.
+                    guard count > 0 else { return }
+                    collected.append(
+                        Data(buffer[0..<count]),
+                        toStandardOutput: isStandardOutput,
+                        ceiling: outputCeiling
+                    )
+                }
+            }
+        }
+
+        /// Tells the read loops to stop. They leave within one poll slice, so
+        /// a pipe no one will ever close cannot hold a thread past this call.
+        func releasePipes() {
+            abandoned.set()
+        }
+        #endif
 
         /// SIGTERM, then SIGKILL, then give up — each bounded. `terminate()`
         /// alone is a request, and a CLI with a stuck graceful-shutdown path
@@ -717,6 +780,29 @@ extension VolcengineUsageService {
 /// The two pipes' bytes, written from two queues and read once after both have
 /// finished. The lock is what makes that safe; the `DispatchGroup` is what
 /// makes "after both have finished" true.
+/// Whether the call has given up on the pipes.
+///
+/// A poll loop outside macOS needs a way to be told to stop, because it may be
+/// watching a write end a grandchild is holding open and nothing else will ever
+/// end it. A plain flag under a lock: it is written once and read on a 200ms
+/// slice, so there is nothing here worth a faster primitive.
+private final class Abandoned: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+
+    var isSet: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    func set() {
+        lock.lock()
+        value = true
+        lock.unlock()
+    }
+}
+
 private final class Collected: @unchecked Sendable {
     private let lock = NSLock()
     private var standardOutput = Data()

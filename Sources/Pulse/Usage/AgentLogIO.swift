@@ -73,8 +73,18 @@ enum AgentLogIO {
 
                 while let file = autoreleasepool(invoking: { walker.nextObject() as? URL }) {
                     guard !Task.isCancelled else { return [] }
+                    // Compared by `path`, not by `URL` equality. `URL ==`
+                    // compares the whole URL, and a URL records whether it
+                    // names a directory in a trailing slash — measured: two
+                    // URLs whose `.path` are both `/tmp/x/p` compare unequal
+                    // when one was built with a directory hint. The root is,
+                    // and the enumerator's children are not, so the equality
+                    // never held on Linux and the excluded directory was
+                    // walked anyway. `path` is what "the same place on disk"
+                    // means, and it is the same answer on both platforms.
                     if !excludingRootDirectories.isEmpty,
-                       file.deletingLastPathComponent().standardizedFileURL == root,
+                       file.deletingLastPathComponent().standardizedFileURL.path
+                           == root.standardizedFileURL.path,
                        excludingRootDirectories.contains(file.lastPathComponent),
                        (try? file.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
                         walker.skipDescendants()

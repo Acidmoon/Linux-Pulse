@@ -63,7 +63,9 @@
 - [ ] 提供迁移文档：架构图、macOS API 替代对照表、已知差异与限制
 
 ## 约束
-- 不要改动 macOS 版现有行为；新代码用条件编译（如 `#if canImport(AppKit)`）或目录隔离，保证 macOS 构建不受影响。
+- 本项目**只支持 Linux**，不发布 macOS 版本。上游 macOS 代码保留在仓库里是为了能持续 merge 上游的 Provider 修复，不是为了维护 macOS 构建——**不要求 macOS 侧可编译**，也不必为它跑 CI。
+- 但**不要拆除**已有的文件级 `#if canImport(...)` 守卫：它们的作用是让 Linux 构建成立、并让上游对这些文件的内部改动仍能自动合并，不是为 macOS 服务的。
+- 新代码用条件编译或目录隔离（沿用现有约定：整文件排除打 `// pulse-linux: excluded` 标记）。
 - 不臆造 API 行为：对不确定的 Linux 桌面行为（如 Wayland 下的窗口定位限制），先实验再写结论。
 - 每完成一个阶段，用 git 提交并写清 commit message；最终交付完整 fork 仓库或可合并的分支。
 

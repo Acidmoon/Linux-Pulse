@@ -123,6 +123,11 @@ enum AgentCache {
 
         var lines: [String] = []
 
+        // Hoisted because the comparison below is made against it, and by
+        // `path` rather than by `URL` equality — see the note in `AgentLogIO`
+        // for why those are different questions.
+        let storedRoot = store.standardizedFileURL
+
         if isDirectory.boolValue {
             let keys: [URLResourceKey] = [.isRegularFileKey, .isDirectoryKey, .fileSizeKey, .contentModificationDateKey]
             if let walker = manager.enumerator(
@@ -133,7 +138,7 @@ enum AgentCache {
                 while let file = autoreleasepool(invoking: { walker.nextObject() as? URL }) {
                     guard !Task.isCancelled else { return [] }
                     if !excludingRootDirectories.isEmpty,
-                       file.deletingLastPathComponent().standardizedFileURL == store.standardizedFileURL,
+                       file.deletingLastPathComponent().standardizedFileURL.path == storedRoot.path,
                        excludingRootDirectories.contains(file.lastPathComponent),
                        (try? file.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
                         walker.skipDescendants()
