@@ -55,7 +55,35 @@ The tail of the same defect. A Volcengine run that read both pipes successfully 
 - **the group kill is checked from outside**, with `kill(grandchild, 0)` on a pid the grandchild wrote itself — not with a flag `Subprocess` sets for itself, which would pass whether or not anything was killed.
 - **the exit is a `waitpid` result**, so `exitCode == 7` cannot be satisfied by a default of 0.
 
-They do not show that a *real* `codex app-server` or `arkcli` behaves. That needs the tools installed and signed in, and remains outstanding.
+They do not show that a *real* `codex app-server` or `arkcli` behaves. That part has since been done by hand, against a real account, and is recorded in [../linux/cli.md](../linux/cli.md).
+
+## One intermittent, seen on CI and not yet named
+
+`RPCRequestLifecycleTests` failed once in five CI runs on `ubuntu-24.04`, on the
+`client → .codex, first → .success` case — the baseline, where the helper
+answers normally. Both of its assertions failed, and the thrown error was
+`Failure.startFailed`. Three consecutive runs of the same suite on the
+development machine passed, at 69s each.
+
+**That failure type is what makes this hard to read, and it is a defect in its
+own right.** `Failure.startFailed` stands for four different things: a spawn
+that failed, a write that did not land, a helper that exited, and a helper that
+closed its output. The `posix_spawn` errno underneath was being discarded in the
+`catch`, so the one piece of evidence that would have distinguished them was
+thrown away at the moment it existed.
+
+Both helper clients now write the reason to stderr before collapsing it
+(`Diagnostic.note`), so the next occurrence names itself. **Nothing has been
+changed to make the failure less likely yet**, deliberately: the candidate
+causes want different fixes — a retry around `ETXTBSY` is right for one, a
+longer readiness wait for another, and a genuine ordering fix for a third — and
+guessing between them would hide the failure rather than fix it.
+
+What is *not* a candidate: the same suite passed on the same runner in the
+commit before and the two after it, and `reconnect` is the one case in that file
+that does not wait for the helper's `ready` file before sending, while its
+neighbours do (their comment: "Helper startup can be delayed on a loaded test
+host"). That is a lead, not a finding.
 
 ## The trap worth recording
 

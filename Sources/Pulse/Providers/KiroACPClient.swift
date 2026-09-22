@@ -76,6 +76,7 @@ actor KiroACPClient {
                 environment: NetworkSession.subprocessEnvironment()
             )
         } catch {
+            Diagnostic.note("could not start the Kiro helper", error)
             throw Failure.startFailed
         }
 
@@ -146,6 +147,7 @@ actor KiroACPClient {
             // False means the write did not land, so whatever is left of the
             // helper is not usable.
             if !child.write(line) {
+                Diagnostic.note("the Kiro helper's stdin would not take a request", nil)
                 shutDown()
             }
         }

@@ -116,6 +116,14 @@ actor CodexAppServer {
                 environment: NetworkSession.subprocessEnvironment()
             )
         } catch {
+            // **Said out loud, because this is the one failure here that carries
+            // no information otherwise.** `Failure.startFailed` is what the
+            // caller sees, and it stands for four different things: a spawn that
+            // failed, a write that did not land, a helper that exited, and a
+            // helper that closed its output. When this fired on CI once and
+            // nowhere else, the errno underneath was the only thing that could
+            // have said which — and it was being discarded right here.
+            Diagnostic.note("could not start the Codex helper", error)
             throw Failure.startFailed
         }
 
@@ -260,6 +268,7 @@ actor CodexAppServer {
         // False means the write did not land. Whatever is left of the helper is
         // not usable, and the next call will start a fresh one.
         if !child.write(line) {
+            Diagnostic.note("the Codex helper's stdin would not take a request", nil)
             shutDown()
         }
     }
