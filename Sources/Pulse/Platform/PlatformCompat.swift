@@ -1,3 +1,5 @@
+import Foundation
+
 #if !canImport(ObjectiveC)
 
 /// `autoreleasepool`, for platforms that have no autorelease pool.
@@ -18,6 +20,53 @@
 @inline(__always)
 func autoreleasepool<Result>(invoking body: () throws -> Result) rethrows -> Result {
     try body()
+}
+
+#endif
+
+#if !canImport(os)
+
+/// `OSAllocatedUnfairLock`, for platforms with no `os` module.
+///
+/// The real thing is a futex-backed unfair lock with its state allocated
+/// alongside it. Neither property matters at these call sites — two of them,
+/// both guarding a small value read and written on the main actor plus a
+/// database queue — so this is a plain `NSLock` around the state and nothing
+/// clever.
+///
+/// The spelling matches so the call sites do not have to know which platform
+/// they are on, including the `uncheckedState:` label: the real type uses it to
+/// say the caller promises the state is `Sendable` without the compiler
+/// checking, which is a promise this has no way to break.
+///
+/// `@unchecked Sendable` for the same reason the real type is: the lock is what
+/// makes it safe, and the compiler cannot see that from the stored property.
+final class OSAllocatedUnfairLock<State>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var state: State
+
+    init(initialState: State) {
+        state = initialState
+    }
+
+    init(uncheckedState: State) {
+        state = uncheckedState
+    }
+
+    // `inout` rather than a plain value, matching the real signature. Callers
+    // mutate a struct field through it, which a by-value closure would not
+    // allow.
+    func withLock<Result>(_ body: (inout State) throws -> Result) rethrows -> Result {
+        lock.lock()
+        defer { lock.unlock() }
+        return try body(&state)
+    }
+
+    func withLockUnchecked<Result>(_ body: (inout State) throws -> Result) rethrows -> Result {
+        lock.lock()
+        defer { lock.unlock() }
+        return try body(&state)
+    }
 }
 
 #endif

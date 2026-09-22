@@ -1,4 +1,15 @@
 import Foundation
+#if canImport(FoundationXML)
+// On Linux the XML tree types live in their own module; on Darwin
+// Foundation re-exports them and this module does not exist.
+import FoundationXML
+#endif
+#if canImport(FoundationNetworking)
+// On Linux, URLSession and friends live in this separate module. On
+// Darwin it does not exist and Foundation already re-exports them, so
+// the guard keeps macOS exactly as it was.
+import FoundationNetworking
+#endif
 
 /// A read-only adapter for Ollama's signed-in settings page, not a public API.
 /// Kept independent of the app so parsing and credential boundaries are testable.
@@ -174,6 +185,24 @@ struct OllamaCloudClient: Sendable {
         configuration.timeoutIntervalForResource = 30
         let session = URLSession(configuration: configuration, delegate: NoRedirects(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
+
+        #if canImport(FoundationNetworking)
+        // `URLSession.bytes(for:)` is not implemented in swift-corelibs-foundation,
+        // so the whole body is taken in one call instead of as a byte stream.
+        //
+        // **What that costs:** `maximumBytes` still rejects an oversized page,
+        // but it can no longer stop one being buffered first — the cap was also
+        // the memory bound, and here it is only a check after the fact. The
+        // page is a provider's own usage screen, so the difference is between
+        // a few hundred kilobytes and a refused response rather than anything
+        // routine; it is recorded rather than glossed because a hostile or
+        // broken endpoint is exactly what the original cap was for.
+        let (data, response) = try await session.data(for: Self.request(cookie: cookie))
+        guard let http = response as? HTTPURLResponse else { throw OllamaCloudError.invalidPage }
+        try Self.validate(http)
+        guard data.count <= OllamaCloudPage.maximumBytes else { throw OllamaCloudError.invalidPage }
+        return try OllamaCloudPage.parse(data)
+        #else
         let (bytes, response) = try await session.bytes(for: Self.request(cookie: cookie))
         guard let http = response as? HTTPURLResponse else { throw OllamaCloudError.invalidPage }
         try Self.validate(http)
@@ -183,6 +212,7 @@ struct OllamaCloudClient: Sendable {
             data.append(byte)
         }
         return try OllamaCloudPage.parse(data)
+        #endif
     }
 }
 

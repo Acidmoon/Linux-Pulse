@@ -9,6 +9,12 @@ import CryptoKit
 import Crypto
 #endif
 import Foundation
+#if canImport(FoundationNetworking)
+// On Linux, URLSession and friends live in this separate module. On
+// Darwin it does not exist and Foundation already re-exports them, so
+// the guard keeps macOS exactly as it was.
+import FoundationNetworking
+#endif
 #if canImport(Network)
 import Network
 #endif
@@ -752,6 +758,7 @@ enum OAuthLogin {
     /// 32 bytes, base64url — comfortably inside the 43…128 characters PKCE
     /// asks of a verifier, and the same generator serves the state.
     static func randomToken() -> String {
+        #if canImport(Security)
         var bytes = [UInt8](repeating: 0, count: 32)
         guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
             // Unpredictability is load-bearing here — this is both the PKCE
@@ -762,6 +769,15 @@ enum OAuthLogin {
             return Data((0..<32).map { _ in UInt8.random(in: .min ... .max) }).base64URLEncoded
         }
         return Data(bytes).base64URLEncoded
+        #else
+        // `Security` does not exist on Linux, so this is the fallback above
+        // rather than a replacement for it. It is not a weaker source:
+        // `UInt8.random(in:)` draws from `SystemRandomNumberGenerator`, which
+        // is `getrandom(2)` on Linux and `arc4random`/`CCRandomGenerateBytes`
+        // on Darwin. The randomness this depends on is the same randomness the
+        // Darwin path already accepts when its own call fails.
+        return Data((0..<32).map { _ in UInt8.random(in: .min ... .max) }).base64URLEncoded
+        #endif
     }
 }
 

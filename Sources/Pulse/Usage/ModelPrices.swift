@@ -1,4 +1,10 @@
 import Foundation
+#if canImport(FoundationNetworking)
+// On Linux, URLSession and friends live in this separate module. On
+// Darwin it does not exist and Foundation already re-exports them, so
+// the guard keeps macOS exactly as it was.
+import FoundationNetworking
+#endif
 
 /// What one model charges, per million tokens.
 ///
@@ -311,7 +317,36 @@ actor ModelPrices {
 
 /// Where Pulse keeps the things too big for `UserDefaults`.
 enum PulseStorage {
-    static let directory: URL = URL.applicationSupportDirectory.appending(path: "Pulse")
+    /// The platform's own application-support folder, with Pulse's name under
+    /// it: `~/Library/Application Support/Pulse` on macOS and
+    /// `~/.local/share/Pulse` on Linux, the latter honouring `XDG_DATA_HOME`
+    /// because that is what Foundation's query resolves to there.
+    ///
+    /// `URL.applicationSupportDirectory` would be the tidy spelling and was
+    /// used here, but it does not exist on Linux — it is a compile error there,
+    /// not a nil — so the throwing `FileManager` accessor does the same job on
+    /// both platforms.
+    static let directory: URL = {
+        if let base = try? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: false
+        ) {
+            return base.appending(path: "Pulse")
+        }
+
+        // Does not fail on either platform in practice. If it ever does, the
+        // fallback is the platform's own convention rather than one platform's
+        // imposed on the other.
+        #if canImport(Darwin)
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appending(path: "Library/Application Support/Pulse", directoryHint: .isDirectory)
+        #else
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appending(path: ".local/share/Pulse", directoryHint: .isDirectory)
+        #endif
+    }()
 
     static func prepare() {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

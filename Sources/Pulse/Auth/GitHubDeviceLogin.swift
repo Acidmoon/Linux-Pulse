@@ -1,4 +1,10 @@
 import Foundation
+#if canImport(FoundationNetworking)
+// On Linux, URLSession and friends live in this separate module. On
+// Darwin it does not exist and Foundation already re-exports them, so
+// the guard keeps macOS exactly as it was.
+import FoundationNetworking
+#endif
 
 /// Signing in to GitHub for Copilot's quota, by device code.
 ///

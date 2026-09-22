@@ -1,4 +1,10 @@
 import Foundation
+#if canImport(FoundationNetworking)
+// On Linux, URLSession and friends live in this separate module. On
+// Darwin it does not exist and Foundation already re-exports them, so
+// the guard keeps macOS exactly as it was.
+import FoundationNetworking
+#endif
 
 /// Antigravity's limits, read from a language server running on this Mac.
 ///
@@ -289,7 +295,7 @@ struct AntigravityUsageService: Sendable {
 
         let session = URLSession(
             configuration: .ephemeral,
-            delegate: LoopbackTrust(),
+            delegate: loopbackTrust,
             delegateQueue: nil
         )
         defer { session.finishTasksAndInvalidate() }
@@ -432,6 +438,30 @@ struct AntigravityUsageService: Sendable {
 /// held to the loopback address: a certificate offered by anything other than
 /// this Mac talking to itself is refused exactly as it would be anywhere else
 /// in the app.
+///
+/// **Nil on Linux, and that is a real gap rather than an omission.**
+/// swift-corelibs-foundation states plainly that it does not support the
+/// methods of authentication that rely on the Darwin Security framework, and
+/// `serverTrust` is named first among them — `NSURLAuthenticationMethodServerTrust`
+/// and `URLProtectionSpace.serverTrust` fail to compile there. So there is no
+/// way to express the exception, and the self-signed certificate this server
+/// presents will be refused by default.
+///
+/// The consequence is bounded and visible: Antigravity reports `.wrongPort`,
+/// which is the same answer it already gives when the language server is not
+/// running. It is a wrong name for the failure, and it is recorded here rather
+/// than papered over. Whether the port is reachable at all over TLS on Linux
+/// needs measuring against a running Antigravity, not reasoning about —
+/// Antigravity ships no Linux build as of writing.
+private var loopbackTrust: URLSessionDelegate? {
+    #if canImport(Security)
+    LoopbackTrust()
+    #else
+    nil
+    #endif
+}
+
+#if canImport(Security)
 private final class LoopbackTrust: NSObject, URLSessionDelegate, Sendable {
     func urlSession(
         _ session: URLSession,
@@ -449,3 +479,4 @@ private final class LoopbackTrust: NSObject, URLSessionDelegate, Sendable {
         completionHandler(.useCredential, URLCredential(trust: trust))
     }
 }
+#endif

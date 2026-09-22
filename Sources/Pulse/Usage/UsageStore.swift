@@ -907,9 +907,23 @@ final class UsageStore {
         guard !settings.needsProviderSelection else { return }
 
         signals.isPanelVisible = settings.isPanelVisible
+        #if canImport(AppKit)
         signals.isConstrained = screensAsleep
             || ProcessInfo.processInfo.isLowPowerModeEnabled
             || [.serious, .critical].contains(ProcessInfo.processInfo.thermalState)
+        #else
+        // Neither low-power mode nor thermal state can be asked about on
+        // Linux — both were compiled to confirm they are absent rather than
+        // assumed. With `screensAsleep` also permanently false there, nothing
+        // constrains the cadence and the one-shot timer runs at the interval
+        // the settings imply.
+        //
+        // A real gap, and a small one: on a laptop with a Linux power daemon
+        // this means Pulse keeps its normal cadence on battery rather than
+        // backing off. Reading `/sys/class/power_supply` is where that gets
+        // fixed, in roadmap phase 3.
+        signals.isConstrained = screensAsleep
+        #endif
         // The monitor is already watching the transcripts on its own clock, so
         // the refresh loop reads its answer rather than scanning again.
         signals.lastAgentActivity = activity.lastWrite

@@ -6,6 +6,12 @@ import CryptoKit
 import Crypto
 #endif
 import Foundation
+#if canImport(FoundationNetworking)
+// On Linux, URLSession and friends live in this separate module. On
+// Darwin it does not exist and Foundation already re-exports them, so
+// the guard keeps macOS exactly as it was.
+import FoundationNetworking
+#endif
 #if canImport(SQLite3)
 import SQLite3
 #else
@@ -888,9 +894,28 @@ struct DevinUsageService: Sendable {
         /// read through here. Shared with `Reply`, whose fields arrive from
         /// `JSONSerialization` in exactly the same shapes.
         static func number(_ value: Any?) -> Double? {
-            guard let value = value as? NSNumber,
-                  CFGetTypeID(value) != CFBooleanGetTypeID()
-            else { return nil }
+            guard let value = value as? NSNumber else { return nil }
+
+            // The two spellings of "is this actually a boolean" are kept apart
+            // rather than unified, because only one of them can be verified
+            // here. The CoreFoundation type-id comparison is what upstream
+            // ships and what its tests were written against, and it cannot be
+            // re-checked on this machine because Darwin is not available to
+            // run it on. `objCType` was measured on Linux — `JSONSerialization`
+            // gives `__NSCFBoolean` with "c" for true and `NSNumber` with "d"
+            // for 1.5 — and taking it on trust for Darwin as well would be an
+            // unverified claim about the platform nobody here can test.
+            //
+            // Guarded on Darwin rather than on `canImport(CoreFoundation)`:
+            // CoreFoundation exists on Linux too, but `CFGetTypeID` and
+            // `CFBooleanGetTypeID` are not exposed there, so the latter guard
+            // selects this branch and then fails to compile.
+            #if canImport(Darwin)
+            guard CFGetTypeID(value) != CFBooleanGetTypeID() else { return nil }
+            #else
+            guard String(cString: value.objCType) != "c" else { return nil }
+            #endif
+
             let double = value.doubleValue
             return double.isFinite ? double : nil
         }

@@ -8,58 +8,34 @@
 import AppKit
 import Carbon.HIToolbox
 
-/// A key combination Pulse answers to from anywhere, not only while it is the
-/// active application.
+/// The parts of `GlobalShortcut` that need AppKit or Carbon to express.
 ///
-/// Stored rather than hardcoded, and unset until someone sets one: a default
-/// combination is a key taken out of every other app's hands on behalf of a
-/// person who never asked for it, and there is no combination free enough to
-/// take that way.
-struct GlobalShortcut: Equatable, Hashable, Sendable {
-    /// The virtual key code, which is a position on the keyboard rather than a
-    /// character — the same physical key on every layout.
-    let keyCode: UInt16
-    /// `NSEvent.ModifierFlags` raw bits, already filtered to the four this can
-    /// register. Kept as bits so the whole value stays `Sendable` and can be
-    /// written to `UserDefaults` as one short string.
-    let modifierBits: UInt
-
+/// The value itself — a key code and a set of modifier bits — is portable and
+/// lives in `Platform/GlobalShortcut.swift`, because `AppSettings` stores one.
+/// What is here is everything that cannot leave this platform: the `NSEvent`
+/// spelling of those bits, the labels printed on the keys, and the bits
+/// `RegisterEventHotKey` wants.
+///
+/// The bit values are not restated. They are read back out of the portable
+/// type, so the two spellings cannot drift apart.
+extension GlobalShortcut {
+    /// The stored bits, in AppKit's spelling.
     var modifiers: NSEvent.ModifierFlags { NSEvent.ModifierFlags(rawValue: modifierBits) }
 
     /// What may be part of a combination.
-    static let allowed: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
+    static var allowed: NSEvent.ModifierFlags {
+        NSEvent.ModifierFlags(rawValue: GlobalShortcut.allowedBits)
+    }
 
-    /// At least one of these has to be in it.
-    ///
-    /// Shift alone is not a modifier for this purpose — `⇧P` would take the
-    /// letter P away from every text field on the Mac, which is a bug report
-    /// from someone who cannot type their own name. Bare keys are refused for
-    /// the same reason, function keys included: F1 already belongs to the
-    /// display's brightness.
-    static let required: NSEvent.ModifierFlags = [.command, .option, .control]
+    /// At least one of these has to be in it. See the portable type for why
+    /// shift alone does not count.
+    static var required: NSEvent.ModifierFlags {
+        NSEvent.ModifierFlags(rawValue: GlobalShortcut.requiredBits)
+    }
 
     /// Nil when the combination is not one Pulse is willing to take.
     init?(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) {
-        let kept = modifiers.intersection(Self.allowed)
-        guard !kept.intersection(Self.required).isEmpty else { return nil }
-        self.keyCode = keyCode
-        self.modifierBits = kept.rawValue
-    }
-
-    // MARK: - Storage
-
-    var storage: String { "\(keyCode):\(modifierBits)" }
-
-    /// A stored value that no longer parses — written by a version that stored
-    /// them differently, or edited by hand — reads as no shortcut rather than
-    /// as a wrong one.
-    init?(storage: String) {
-        let parts = storage.split(separator: ":")
-        guard parts.count == 2,
-              let keyCode = UInt16(parts[0]),
-              let bits = UInt(parts[1])
-        else { return nil }
-        self.init(keyCode: keyCode, modifiers: NSEvent.ModifierFlags(rawValue: bits))
+        self.init(keyCode: keyCode, modifierBits: modifiers.rawValue)
     }
 
     // MARK: - Display

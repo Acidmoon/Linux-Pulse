@@ -518,6 +518,21 @@ final class UsageAlerts {
         #endif
     }
 
+    /// Whether nobody has been asked yet, in the one shape both platforms can
+    /// answer.
+    ///
+    /// The macOS expression compares against `UNAuthorizationStatus`, which
+    /// does not exist on Linux. It is reached only when `isSupported` is true —
+    /// which it never is there — so the Linux answer is never consulted; `true`
+    /// is returned because it is what the short-circuit above leaves in force.
+    private var hasUndecidedAuthorization: Bool {
+        #if canImport(UserNotifications)
+        authorization == .notDetermined
+        #else
+        true
+        #endif
+    }
+
     /// Re-reads the grant. Called when the settings window opens, because that
     /// is the only place `authorization` is shown and it can have been
     /// withdrawn in System Settings at any point since launch.
@@ -592,7 +607,7 @@ final class UsageAlerts {
         // every launch — measured — and a run of failures was counted up for a
         // feature nobody had turned on.
         guard settings.wantsAlerts, authorizationRequest == nil,
-              !Self.isSupported || authorization != .notDetermined else { return }
+              !Self.isSupported || hasUndecidedAuthorization else { return }
 
         let before = memory
         let alerts = memory.alerts(
