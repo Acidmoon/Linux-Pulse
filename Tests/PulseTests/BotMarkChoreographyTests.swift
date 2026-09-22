@@ -1,3 +1,7 @@
+// The macOS UI. Excluded from the Linux build with the code it tests — see
+// Docs/linux/migration-assessment.md.
+// pulse-linux: excluded
+#if canImport(AppKit)
 import AppKit
 import SwiftUI
 import Testing
@@ -317,3 +321,4 @@ struct BotMarkChoreographyTests {
         let config: BotMarkConfig
     }
 }
+#endif

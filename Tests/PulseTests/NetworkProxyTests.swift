@@ -1,4 +1,8 @@
 import Foundation
+#if canImport(FoundationNetworking)
+// URLSessionConfiguration lives here on Linux.
+import FoundationNetworking
+#endif
 import Testing
 @testable import Pulse
 
@@ -17,7 +21,7 @@ struct NetworkProxyTests {
         withIsolatedDefaults { defaults in
             #expect(AppSettings.storedNetworkProxy(in: defaults) == .default)
             #expect(NetworkProxySettings.default.mode == .system)
-            #expect(NetworkSession.configured(.ephemeral, for: .default).proxyConfigurations.isEmpty)
+            #expect(proxyCount(NetworkSession.configured(.ephemeral, for: .default)) == 0)
         }
     }
 
@@ -33,7 +37,7 @@ struct NetworkProxyTests {
                 )
                 AppSettings.storeNetworkProxy(settings, in: defaults)
                 #expect(AppSettings.storedNetworkProxy(in: defaults) == settings)
-                #expect(NetworkSession.configured(.ephemeral, for: settings).proxyConfigurations.count == 1)
+                #expect(proxyCount(NetworkSession.configured(.ephemeral, for: settings)) == 1)
             }
         }
     }
@@ -95,4 +99,31 @@ struct NetworkProxyTests {
     func systemProcessEnvironmentIsInherited() {
         #expect(NetworkProxySettings.default.processEnvironment(over: ["HTTPS_PROXY": "http://shell:9"]) == nil)
     }
+}
+
+
+/// Reads the proxy back out of a configuration without caring which spelling
+/// the platform uses.
+///
+/// `NetworkProxy.configured` sets `proxyConfigurations` on Darwin and
+/// `connectionProxyDictionary` on Linux, because Foundation there has neither
+/// `ProxyConfiguration` nor `proxyConfigurations` — both were compiled to
+/// confirm. The assertions that matter are the same either way: whether a
+/// system-mode configuration carries a proxy at all, and whether a manual one
+/// carries exactly the one that was asked for. Spelling that against
+/// `proxyConfigurations` directly made the test Darwin-only for no reason.
+///
+/// Free functions rather than an extension: `URLSessionConfiguration` is an
+/// `AnyObject` alias on Linux, and a non-nominal type cannot be extended.
+private func proxyCount(_ configuration: URLSessionConfiguration) -> Int {
+    #if canImport(FoundationNetworking)
+    guard let dictionary = configuration.connectionProxyDictionary else { return 0 }
+    // The Linux branch writes one enable key per kind, and libcurl reads
+    // either HTTP or SOCKS — never both.
+    let enabled = ["HTTPEnable", "HTTPSEnable", "SOCKSEnable"]
+        .filter { (dictionary[$0] as? Int) == 1 }
+    return enabled.isEmpty ? 0 : 1
+    #else
+    return configuration.proxyConfigurations.count
+    #endif
 }

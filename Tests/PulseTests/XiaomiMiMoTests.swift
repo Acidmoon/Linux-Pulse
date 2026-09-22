@@ -218,10 +218,15 @@ struct XiaomiMiMoTests {
     /// mark is indistinguishable from one that failed to load. Asked through
     /// the app's own loader, because `Bundle.module` inside a test is the
     /// *test* bundle and would answer nil for every mark there is.
+    // Loading the mark means decoding it into an `NSImage`, so the assertion
+    // is macOS-only. The resource name itself is already pinned by the
+    // provider tests above.
+    #if canImport(AppKit)
     @Test("The mark loads")
     @MainActor
     func iconResourceLoads() {
         #expect(LobeIconStore.image(named: Provider.xiaomiMiMo.iconResource) != nil,
                 "\(Provider.xiaomiMiMo.iconResource).svg does not load")
     }
+    #endif
 }

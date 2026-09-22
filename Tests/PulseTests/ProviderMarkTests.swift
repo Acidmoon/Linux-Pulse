@@ -1,3 +1,7 @@
+// The macOS UI. Excluded from the Linux build with the code it tests — see
+// Docs/linux/migration-assessment.md.
+// pulse-linux: excluded
+#if canImport(AppKit)
 import AppKit
 import Testing
 @testable import Pulse
@@ -72,3 +76,4 @@ struct ProviderMarkTests {
         }
     }
 }
+#endif

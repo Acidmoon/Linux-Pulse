@@ -1,6 +1,8 @@
 import Foundation
 import Testing
+#if canImport(UserNotifications)
 import UserNotifications
+#endif
 @testable import Pulse
 
 /// The notification rules, which are the reason `AlertMemory.alerts` was
@@ -796,6 +798,11 @@ struct NotificationAuthorizationTests {
                               lowBalance: nil, staleMeansFailure: false, now: Date()).count == 1)
     }
 
+    // The one test in this file that is about delivery rather than about the
+    // rules. `NotificationTapHandler` and the protocol it conforms to exist
+    // only where there is a notification centre to conform to; everything else
+    // here is `AlertMemory`, which is portable and testable on Linux.
+    #if canImport(UserNotifications)
     @Test("The foreground presentation callback is a real optional protocol method")
     func foregroundSelectorIsImplemented() {
         let handler = NotificationTapHandler(open: {})
@@ -803,4 +810,5 @@ struct NotificationAuthorizationTests {
             _:willPresent:withCompletionHandler:
         ))))
     }
+    #endif
 }

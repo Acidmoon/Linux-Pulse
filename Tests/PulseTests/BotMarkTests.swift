@@ -1,3 +1,7 @@
+// The macOS UI. Excluded from the Linux build with the code it tests — see
+// Docs/linux/migration-assessment.md.
+// pulse-linux: excluded
+#if canImport(SwiftUI)
 import SwiftUI
 import Testing
 @testable import Pulse
@@ -854,3 +858,4 @@ struct BotMarkTests {
             + 0.0722 * base.blueComponent
     }
 }
+#endif

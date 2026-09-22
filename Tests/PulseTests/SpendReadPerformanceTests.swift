@@ -1,4 +1,8 @@
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 import Foundation
 import Testing
 @testable import Pulse
@@ -33,7 +37,17 @@ struct SpendReadPerformanceTests {
         #expect(records.count == 1)
         #expect(records.first?.tally == TokenTally(input: 100, output: 20))
         var usage = rusage()
+        #if canImport(Darwin)
         getrusage(RUSAGE_SELF, &usage)
-        print("Spend synthetic JSONL: \(line.count * 16_384) bytes, \(elapsed), peak RSS \(usage.ru_maxrss) bytes")
+        // `ru_maxrss` is bytes on Darwin and kilobytes on Linux, which is why
+        // the unit is printed rather than assumed.
+        let peak = "\(usage.ru_maxrss) bytes"
+        #else
+        // `RUSAGE_SELF` is an enum on Linux and an Int32 on Darwin, so the raw
+        // value is what the call takes there.
+        getrusage(Int32(RUSAGE_SELF.rawValue), &usage)
+        let peak = "\(usage.ru_maxrss) KB"
+        #endif
+        print("Spend synthetic JSONL: \(line.count * 16_384) bytes, \(elapsed), peak RSS \(peak)")
     }
 }

@@ -1,3 +1,8 @@
+// The macOS UI. Excluded from the Linux build with the code it tests —
+// `DockLayout` and the rail's shapes are SwiftUI geometry. See
+// Docs/linux/migration-assessment.md.
+// pulse-linux: excluded
+#if canImport(AppKit)
 import Foundation
 import Testing
 @testable import Pulse
@@ -341,3 +346,4 @@ struct RailOffsetTests {
         #expect(offsets.leading <= max(tiny.width - rail.width, 0))
     }
 }
+#endif

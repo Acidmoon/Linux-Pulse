@@ -311,6 +311,9 @@ struct AgentIconTests {
     /// these, so asking it answers nil for every mark including the ones that
     /// have shipped since the first release. This also proves the file loads
     /// as an image rather than merely existing.
+    // `LobeIconStore` turns an SVG into an `NSImage`, so this cannot run on
+    // Linux. The catalogue assertions either side of it do.
+    #if canImport(AppKit)
     @Test("Every named icon loads")
     func resourcesExist() {
         for agent in SpendAgent.allCases {
@@ -321,6 +324,7 @@ struct AgentIconTests {
             )
         }
     }
+    #endif
 
     /// An agent that is a provider Pulse already draws must reuse that exact
     /// file rather than a second copy that could drift from it.

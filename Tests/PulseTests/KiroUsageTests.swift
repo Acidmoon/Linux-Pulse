@@ -14,9 +14,15 @@ struct KiroUsageTests {
     @Test("Provider uses the bundled Kiro mark")
     @MainActor
     func hasBundledIcon() throws {
+        // The name is portable; loading it is not — `LobeIconStore` decodes
+        // the SVG into an `NSImage`. Keeping the first assertion on Linux is
+        // the point: it is the one that catches a provider being given a
+        // resource name no file was ever added for.
         #expect(Provider.kiro.iconResource == "kiro")
+        #if canImport(AppKit)
         #expect(LobeIconStore.image(named: Provider.kiro.iconResource) != nil,
                 "\(Provider.kiro.iconResource).svg does not load")
+        #endif
     }
 
     @Test("ACP usage maps every bounded credit pool")

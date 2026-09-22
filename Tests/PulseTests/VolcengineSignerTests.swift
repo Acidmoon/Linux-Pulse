@@ -1,4 +1,9 @@
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+// swift-crypto, Apple's cross-platform implementation of the same API.
+import Crypto
+#endif
 import Foundation
 import Testing
 @testable import Pulse

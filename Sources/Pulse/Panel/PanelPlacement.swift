@@ -1,12 +1,16 @@
-// The macOS UI. Excluded from the Linux build rather than ported: this file
-// is SwiftUI/AppKit presentation, and the Linux panel is drawn by a separate
-// GTK4 process (see Docs/linux/migration-assessment.md). The guard is the
-// module the file actually imports, so a file that only needs SwiftUI is not
-// asking for AppKit.
-// pulse-linux: excluded
-#if canImport(SwiftUI)
 import Foundation
+// `@Observable` comes from Observation, which SwiftUI re-exported. Importing
+// it directly is what lets this file build where SwiftUI does not exist.
+import Observation
+
+// SwiftUI is needed for the three `Alignment` properties below and for nothing
+// else — every other type here (`CGRect`, `CGSize`, `CGPoint`, `CGFloat`) comes
+// from Foundation. The import is kept for macOS because removing it would be a
+// change to that build rather than a portability fix, and it is guarded so the
+// Linux build does not need a module it barely uses.
+#if canImport(SwiftUI)
 import SwiftUI
+#endif
 
 /// Which side the rail's back faces — so, which side the details card opens
 /// away from.
@@ -35,6 +39,11 @@ enum PanelEdge: String, Sendable {
     var isVertical: Bool { axis == .vertical }
     var isLeft: Bool { self == .left }
 
+    /// The alignment properties below describe how SwiftUI stacks the rail, so
+    /// they are the only part of this file that needs SwiftUI. The edges and
+    /// the geometry — which is what the settings store, the placement maths and
+    /// the tests are about — do not.
+    #if canImport(SwiftUI)
     /// Where the rail's container is pinned inside the panel. The offset along
     /// the panel is applied separately (`PanelPlacement.railTop` and
     /// `railLeading`), so this pins the container to the corner those offsets
@@ -65,6 +74,7 @@ enum PanelEdge: String, Sendable {
         case .top: .topLeading
         }
     }
+    #endif
 
     /// Which way, along the axis the card unfolds across, it moves clear of
     /// the rail. Positive is right for a side dock and down for the top one,
@@ -449,4 +459,3 @@ final class PanelPlacement {
 private extension Double {
     var clampedToUnitRange: Double { min(max(self, 0), 1) }
 }
-#endif

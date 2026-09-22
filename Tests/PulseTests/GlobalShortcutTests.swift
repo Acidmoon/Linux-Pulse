@@ -1,3 +1,7 @@
+// The macOS UI. Excluded from the Linux build with the code it tests — see
+// Docs/linux/migration-assessment.md.
+// pulse-linux: excluded
+#if canImport(AppKit)
 import Carbon.HIToolbox
 import AppKit
 import Testing
@@ -82,3 +86,4 @@ struct GlobalShortcutTests {
         #expect(bits & UInt32(shiftKey) == 0)
     }
 }
+#endif

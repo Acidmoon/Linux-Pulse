@@ -1,3 +1,7 @@
+// The macOS UI. Excluded from the Linux build with the code it tests — the
+// BotMark animation is drawn by SwiftUI. See Docs/linux/migration-assessment.md.
+// pulse-linux: excluded
+#if canImport(AppKit)
 import Foundation
 import Testing
 @testable import Pulse
@@ -146,3 +150,4 @@ struct BotMarkRestTests {
         #expect(BotMarkMood.unavailable.upstreamState == "confused")
     }
 }
+#endif
