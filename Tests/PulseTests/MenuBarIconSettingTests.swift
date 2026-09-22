@@ -28,6 +28,21 @@ struct MenuBarIconSettingTests {
         #expect(panelChanges == 0)
     }
 
+    @Test("The menu bar remains when both other entry points are unavailable")
+    func preservesAnEntryPoint() {
+        // `panelVisible` means an actual panel can be shown. Before provider
+        // selection the caller passes false even if the preference is true.
+        #expect(AppDelegate.menuBarIconMustRemainVisible(
+            panelVisible: false, hasRegisteredShortcut: false
+        ))
+        #expect(!AppDelegate.menuBarIconMustRemainVisible(
+            panelVisible: true, hasRegisteredShortcut: false
+        ))
+        #expect(!AppDelegate.menuBarIconMustRemainVisible(
+            panelVisible: false, hasRegisteredShortcut: true
+        ))
+    }
+
     @Test("The status menu can be rebuilt and keeps its keyboard shortcuts")
     @MainActor
     func statusMenuRebuild() {

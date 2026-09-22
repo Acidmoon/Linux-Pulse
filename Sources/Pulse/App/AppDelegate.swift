@@ -29,7 +29,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settings.onMenuBarIconChange = { [weak self] in
             self?.updateMenuBarItem()
         }
-        updateMenuBarItem()
 
         // **Writing to a pipe whose far end has closed raises SIGPIPE, whose
         // default is to kill the process.** Pulse writes to one: the Codex
@@ -73,6 +72,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.settings.isPanelVisible.toggle()
         }
         shortcuts.apply(settings)
+        shortcuts.onRegistrationChange = { [weak self] in
+            self?.restoreMenuBarEntryPointIfNeeded()
+        }
+
+        // A stored shortcut is only an entry point after Carbon accepts it.
+        // Repair an impossible combination before removing the status item,
+        // including settings written by a previous build.
+        restoreMenuBarEntryPointIfNeeded()
+        updateMenuBarItem()
 
         if settings.needsProviderSelection {
             showProviderSelection(providers: Set(Provider.allCases), isInitial: true)
@@ -91,6 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func settingsChanged() {
+        restoreMenuBarEntryPointIfNeeded()
         settingsWindow?.refreshTitle()
         providerSetupWindow?.refreshTitle()
         guard !settings.needsProviderSelection else { return }
@@ -153,6 +162,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateMenuBarItem() {
+        restoreMenuBarEntryPointIfNeeded()
         if settings.hidesMenuBarIcon {
             if let statusItem {
                 NSStatusBar.system.removeStatusItem(statusItem)
@@ -175,6 +185,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         item.menu = menu
         statusItem = item
+    }
+
+    /// An accessory app has no Dock icon. When the panel is also hidden, a
+    /// successfully registered global shortcut is the only replacement for
+    /// the status item; a stored shortcut that Carbon refused does not count.
+    /// Internal and pure so the launch-safety rule can be pinned by a test.
+    nonisolated static func menuBarIconMustRemainVisible(
+        panelVisible: Bool,
+        hasRegisteredShortcut: Bool
+    ) -> Bool {
+        !panelVisible && !hasRegisteredShortcut
+    }
+
+    private func restoreMenuBarEntryPointIfNeeded() {
+        guard settings.hidesMenuBarIcon,
+              Self.menuBarIconMustRemainVisible(
+                  // Before a provider is selected there is no panel controller,
+                  // whatever the persisted visibility preference says.
+                  panelVisible: !settings.needsProviderSelection && settings.isPanelVisible,
+                  hasRegisteredShortcut: shortcuts.hasRegisteredEntryPoint
+              )
+        else { return }
+        settings.hidesMenuBarIcon = false
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {

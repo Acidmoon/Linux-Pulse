@@ -28,6 +28,9 @@ The ACP reply supplies the plan name, billing-cycle reset, and one or more
 bounded credit pools. Pulse draws each bounded pool as a monthly window and
 uses the provider's own `used` and `limit` values. The reset date is shown, but
 the ring does not infer a fixed 30-day duration from a date-only reset.
+Each window is identified by Kiro's resource type rather than its position in
+the reply, so a reordered or newly inserted pool does not move a saved pin,
+reset history, or alert state onto another allowance.
 
 This route was validated with Kiro CLI 2.22.1 (ACP agent server 0.66.4) against
 the same signed-in account as Kiro's `/usage` panel. The plan, credits, and

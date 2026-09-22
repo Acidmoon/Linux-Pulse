@@ -53,5 +53,15 @@ struct PulseApp: App {
         Settings {
             EmptyView()
         }
+        // The delegate owns the real settings window. Replacing the standard
+        // command keeps Command-, from opening this required but empty scene.
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button(String.localized("Settings…")) {
+                    appDelegate.showSettings()
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
+        }
     }
 }
