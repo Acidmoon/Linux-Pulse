@@ -1,0 +1,5 @@
+module CGTK4LayerShell [system] {
+  header "pulse-layer-shell.h"
+  export *
+  link "gtk4-layer-shell"
+}

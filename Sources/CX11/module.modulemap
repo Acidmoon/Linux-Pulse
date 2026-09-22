@@ -1,0 +1,5 @@
+module CX11 [system] {
+  header "pulse-x11.h"
+  export *
+  link "X11"
+}

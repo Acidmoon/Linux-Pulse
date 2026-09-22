@@ -1,13 +1,17 @@
-// The macOS UI. Excluded from the Linux build rather than ported: this file
-// is SwiftUI/AppKit presentation, and the Linux panel is drawn by a separate
-// GTK4 process (see Docs/linux/migration-assessment.md). The guard is the
-// module the file actually imports, so a file that only needs SwiftUI is not
-// asking for AppKit.
-// pulse-linux: excluded
+// Upstream's own code. Only two things about it are SwiftUI: the imports, and
+// the environment key at the end, which is how the warning threshold reaches
+// every ring without being threaded through seventeen initializers. The key is
+// gated and everything above it runs here — and the part that matters is
+// `UsageTint.color(for:isExhausted:warningAt:)`, which **is** the rule that
+// decides what colour a ring is. A ported panel must not invent its own.
+// pulse-linux: reused
 #if canImport(AppKit)
 import AppKit
+#endif
+#if canImport(SwiftUI)
 import SwiftUI
-
+#endif
+import Foundation
 extension UsageWindow {
     /// Colour for how much of a limit is gone.
     ///
@@ -106,12 +110,12 @@ extension Color {
     /// answers its components in that space, and the numbers would not survive
     /// a round trip.
     var hexString: String? {
-        guard let srgb = NSColor(self).usingColorSpace(.sRGB) else { return nil }
+        guard let srgb = reading else { return nil }
         return String(
             format: "#%02X%02X%02X",
-            Int((srgb.redComponent * 255).rounded()),
-            Int((srgb.greenComponent * 255).rounded()),
-            Int((srgb.blueComponent * 255).rounded())
+            Int((srgb.red * 255).rounded()),
+            Int((srgb.green * 255).rounded()),
+            Int((srgb.blue * 255).rounded())
         )
     }
 
@@ -142,6 +146,11 @@ extension Color {
 
 /// How full a limit has to be before the panel draws it in the warning colour.
 ///
+#if canImport(SwiftUI)
+// **The one part of this file that is SwiftUI and not numbers.** The threshold
+// could be passed down instead, and upstream's comment above explains at length
+// why it is not. On Linux the panel reads `UsageTint.warningThreshold` directly,
+// so nothing is lost by not having the key.
 /// Through the environment rather than down the initializers. It is one number
 /// that every ring, bar and figure on the panel has to agree on, and the
 /// alternative is a field in `RailEntry`, another in the dock's item, and a

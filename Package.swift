@@ -1,6 +1,7 @@
 // swift-tools-version: 6.0
 
 import PackageDescription
+import Foundation
 
 // The manifest is evaluated by the host's toolchain, so `#if os(macOS)` here
 // picks the dependency set for the platform being built on rather than for
@@ -68,6 +69,11 @@ let pulseLinkerSettings: [LinkerSetting] = [
 // See the Linux branch below for why these are hoisted.
 let cSQLitePkgConfig: String? = nil
 let cSQLiteProviders: [SystemPackageProvider] = []
+
+// There is no GTK on a Mac and the macOS panel is the SwiftUI one, so the
+// panel's targets do not exist here at all rather than being excluded later.
+let panelTargets: [Target] = []
+let panelProducts: [Product] = []
 #else
 let platformDependencies: [Package.Dependency] = [
     .package(url: "https://github.com/apple/swift-crypto.git", "3.0.0"..<"4.0.0")
@@ -92,6 +98,77 @@ let cSQLitePkgConfig: String? = "sqlite3"
 let cSQLiteProviders: [SystemPackageProvider] = [
     .apt(["libsqlite3-dev"]), .yum(["sqlite-devel"])
 ]
+
+// The Linux panel's three C surfaces, each its own target because each is a
+// separate optional dependency and the panel has to be able to run without two
+// of them:
+//
+//   - CGTK4 is the window, the widgets and the CSS.
+//   - CGTK4LayerShell is the Wayland protocol for edge-docked windows. A
+//     machine without it builds and runs the panel on X11; nothing else
+//     changes, because the panel asks `pulse_layer_shell_supported()` at
+//     runtime and only Wayland ever says yes.
+//   - CX11 is the same "always on top" answer for X11, which GTK4 has no API
+//     for and layer-shell does not cover.
+//
+// They are `systemLibrary` targets rather than C targets with sources: every
+// helper in them is a cast or a macro wrapper, which the compiler can inline,
+// and a C target would be a second build system to keep working for no library
+// of its own. See Sources/CGTK4/pulse-gtk.h.
+//
+// `SystemPackageProvider` has no `.dnf`; apt is the distribution the port is
+// verified against and RPM users install these by hand (Docs/linux/install.md).
+//
+// **The panel's targets only exist where GTK4 does**, which is checked here
+// rather than left to fail at compile time. `swift test` builds every target in
+// the package, so an unconditional `PulsePanel` would mean the *core* could no
+// longer be built or tested on a machine without GTK4's headers — and this port
+// has a headless half that has to keep working on exactly such a machine. A
+// package whose manifest cannot express that is a package that cannot be tested
+// on a server.
+//
+// The check looks for the `.pc` files on the paths pkg-config will search,
+// rather than running pkg-config: SwiftPM evaluates this manifest inside a
+// sandbox that may not permit it, and a manifest that fails to evaluate is a
+// build that fails for a reason nobody can read.
+func pkgConfigHas(_ module: String) -> Bool {
+    let environment = ProcessInfo.processInfo.environment["PKG_CONFIG_PATH"] ?? ""
+    let searchPaths = environment.split(separator: ":").map(String.init) + [
+        "/usr/lib/x86_64-linux-gnu/pkgconfig", "/usr/lib/aarch64-linux-gnu/pkgconfig",
+        "/usr/lib/pkgconfig", "/usr/share/pkgconfig",
+        "/usr/local/lib/pkgconfig", "/usr/local/share/pkgconfig",
+    ]
+    return searchPaths.contains { FileManager.default.fileExists(atPath: $0 + "/" + module + ".pc") }
+}
+
+let panelTargets: [Target] = !pkgConfigHas("gtk4") ? [] : [
+    .systemLibrary(
+        name: "CGTK4",
+        path: "Sources/CGTK4",
+        pkgConfig: "gtk4",
+        providers: [.apt(["libgtk-4-dev"])]
+    ),
+    .systemLibrary(
+        name: "CGTK4LayerShell",
+        path: "Sources/CGTK4LayerShell",
+        pkgConfig: "gtk4-layer-shell-0",
+        providers: [.apt(["libgtk4-layer-shell-dev"])]
+    ),
+    .systemLibrary(
+        name: "CX11",
+        path: "Sources/CX11",
+        pkgConfig: "x11",
+        providers: [.apt(["libx11-dev"])]
+    ),
+    .executableTarget(
+        name: "PulsePanel",
+        dependencies: ["Pulse", "CGTK4", "CGTK4LayerShell", "CX11"],
+        path: "Sources/PulsePanel"
+    )
+]
+let panelProducts: [Product] = panelTargets.isEmpty ? [] : [
+    .executable(name: "PulsePanel", targets: ["PulsePanel"])
+]
 #endif
 let package = Package(
     name: "Pulse",
@@ -100,9 +177,13 @@ let package = Package(
     platforms: [
         .macOS(.v14)
     ],
+    // The floating panel is a separate executable rather than a mode of
+    // `Pulse` because it is the one thing here that links GTK4, and
+    // `pulse --json` has to keep working on a machine with no GUI libraries at
+    // all — a link-time dependency would take that away.
     products: [
         .executable(name: "Pulse", targets: ["Pulse"])
-    ],
+    ] + panelProducts,
     dependencies: platformDependencies,
     targets: [
         // Supplied on both platforms rather than only on Linux, so that
@@ -140,5 +221,5 @@ let package = Package(
                 .copy("Fixtures")
             ]
         )
-    ]
+    ] + panelTargets
 )

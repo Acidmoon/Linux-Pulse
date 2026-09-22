@@ -515,6 +515,13 @@ extension PathCommand {
 
 // MARK: - Colour
 
+/// The colour space `Color.init?(hex:)` names. There is one on Linux, so this
+/// is a spelling rather than a choice — `SwiftUI` has the same case and the
+/// initializer below ignores it either way.
+enum RGBColorSpace: Sendable {
+    case sRGB
+}
+
 /// A colour, as the panel's own code treats one: four components and nothing
 /// else. No colour space, no dynamic appearance, no named catalogue.
 ///
@@ -535,6 +542,13 @@ struct Color: Hashable, Sendable {
         self.green = green
         self.blue = blue
         self.opacity = opacity
+    }
+
+    /// The `SwiftUI` spelling, with the colour space named. The space is
+    /// accepted and ignored: a Linux colour is sRGB because that is what the
+    /// screen is, not because it was told.
+    init(_ space: RGBColorSpace, red: Double, green: Double, blue: Double, opacity: Double = 1) {
+        self.init(red: red, green: green, blue: blue, opacity: opacity)
     }
 
     /// Grayscale, which is how the eyes are coloured.

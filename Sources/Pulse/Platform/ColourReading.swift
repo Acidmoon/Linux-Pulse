@@ -29,25 +29,6 @@ struct ColourReading: Equatable, Sendable {
     var hue: Double
 }
 
-#if !canImport(AppKit)
-extension Color {
-    /// "#RRGGBB", which is what a chosen colour is stored as.
-    ///
-    /// Upstream's copy of this lives in `Panel/UsageTint.swift` and goes via
-    /// `NSColor(self).usingColorSpace(.sRGB)`, with a comment explaining that a
-    /// colour picked in another space answers its components in that space and
-    /// the numbers would not survive a round trip. A Linux `Color` has one
-    /// space and stores its numbers, so there is no round trip to lose — and
-    /// this is the same `String(format:)` on the far side.
-    var hexString: String? {
-        String(format: "#%02X%02X%02X",
-               Int((red * 255).rounded()),
-               Int((green * 255).rounded()),
-               Int((blue * 255).rounded()))
-    }
-}
-#endif
-
 extension Color {
     /// Nil for a colour that has no sRGB answer. Only reachable through the
     /// AppKit path — a Linux `Color` always has components — and it exists
