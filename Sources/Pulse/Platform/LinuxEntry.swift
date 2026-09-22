@@ -27,7 +27,12 @@ import Foundation
 ///   decides an installation's defaults.
 @main
 enum PulseLinuxMain {
-    static func main() {
+    /// `async` for `--refresh` alone, which has to await a pass. It cannot
+    /// block on one instead: `UsageStore` is main-actor bound, so a semaphore
+    /// held on this thread would stop the very work it was waiting for. The
+    /// other modes are synchronous and run before the first suspension, so
+    /// nothing about the status line's path changed.
+    static func main() async {
         // Before anything can write to a child. A helper exiting closes its
         // end of a pipe, and the write Pulse does next would kill it — macOS
         // does this in `AppDelegate`, which is not built here.
@@ -52,6 +57,12 @@ enum PulseLinuxMain {
             exit(UsageReport.run())
         }
 
+        // After `--json`, because the two are usually run together and the one
+        // that reads should not have to wait behind the one that fetches.
+        if CommandLine.arguments.contains(UsageRefresh.modeArgument) {
+            exit(await UsageRefresh.run())
+        }
+
         LegacyDefaults.migrateIfNeeded()
 
         // No panel to open yet, so say so rather than exiting silently. A
@@ -68,13 +79,14 @@ enum PulseLinuxMain {
         core it will read from. Available now:
 
           --json                 print the last readings, one account each
+          --refresh              ask every enabled provider once, then exit
           --statusline           Claude Code status line mode (reads stdin)
           --install-statusline   register this binary as Claude Code's status line
           --uninstall-statusline undo that
 
-        \(UsageReport.modeArgument) prints the cache and never fetches. It needs
-        something to have fetched first, which today means the macOS app or a
-        fetch entry point that is still to come.
+        \(UsageRefresh.modeArgument) fills the cache and \(UsageReport.modeArgument) reads it. Both
+        work with no display; \(UsageReport.modeArgument) on its own never fetches, so
+        the figures it prints are as old as the last \(UsageRefresh.modeArgument).
 
         """
     }

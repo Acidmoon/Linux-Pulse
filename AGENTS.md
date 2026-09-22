@@ -69,11 +69,27 @@
 - 不臆造 API 行为：对不确定的 Linux 桌面行为（如 Wayland 下的窗口定位限制），先实验再写结论。
 - 每完成一个阶段，用 git 提交并写清 commit message；最终交付完整 fork 仓库或可合并的分支。
 
+## 当前进度（阶段一）
+
+| 项 | 状态 |
+|---|---|
+| Linux `swift build` / `swift build --build-tests` | ✅ |
+| `swift test` | ✅ 717 tests / 75 suites 全绿 |
+| `pulse --refresh` / `pulse --json` 无 GUI 可用 | ✅ 已实测（真实 `codex app-server` 握手通过） |
+| 无 `DISPLAY` 环境可运行 | ✅ |
+| 三个 provider 的**登录** + 取数 | ⚠️ 阻塞：登录流程由设置窗口驱动，属阶段二。当前只能用已存在的凭据 |
+| 悬浮窗 UI | ⬜ 阶段二 |
+
+无头接口的完整说明（输出、退出码、已知缺口）：`Docs/linux/cli.md`。
+
 ## 关键实现约定（必须遵守）
 
 **子进程一律走 `Sources/Pulse/Platform/Subprocess.swift`，不要用 Foundation 的 `Process`。**
 本平台的 `Process` 与 `readabilityHandler` 已实测有三处不可靠（大流量管道不投递 EOF、已死子进程不被 reap 导致 `isRunning` 永真、`terminationHandler` 不触发），
 Providers 的子进程封装曾逐个踩中。测量数据与取舍见 `Docs/decisions/linux-subprocess.md`，当前 API 与调用点见 `Docs/linux/subprocess.md`。
+
+**`--refresh` 必须 await，不能用信号量阻塞主线程。** `UsageStore` 是 `@MainActor` 绑定的，
+在那个线程上握着信号量会把它正在等的那件事一起停住。入口 `PulseLinuxMain.main()` 因此是 `async` 的。
 
 **入口必须先调用 `Subprocess.ignoreSIGPIPE()`。** 往已关闭的管道写会触发 `SIGPIPE`，默认动作是终止进程——
 即子进程退出会把 Pulse 一起带走。macOS 侧在 `AppDelegate` 里做这件事，而那个文件在 Linux 上被排除。

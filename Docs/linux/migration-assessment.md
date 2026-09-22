@@ -262,12 +262,21 @@ Reader 读的目标是别的 agent 的存放位置，其中 `~/.claude`、`~/.co
 | 1.7 | **新增 `pulse --refresh`**（无 GUI 取数入口）：跑一次全量 refresh 并落 `UsageCache`。**对 macOS 是纯增量**，不改现有 `--json` 语义 | CLI | `pulse --refresh && pulse --json` 输出真实数值 |
 | 1.8 | **测试**：61 个可移植测试全绿；9 个 GUI 测试条件编译排除 | `swift test` | Linux 全绿且**无跳过**（被排除的应在 macOS 侧仍全绿） |
 
-**阶段一验收（对应 AGENTS.md）**：
-- [ ] Linux `swift build` 通过
-- [ ] `swift test` 全绿
-- [ ] `pulse --refresh && pulse --json` 对 Claude Code / Codex 输出真实数值
-- [ ] 无 `DISPLAY` 环境下上述命令可运行
-- [ ] macOS `main` 分支构建未受影响
+**阶段一验收（对应 AGENTS.md）** — 实测更新：
+
+- [x] Linux `swift build` 通过
+- [x] `swift test` 全绿（717 tests / 75 suites）
+- [x] `pulse --refresh && pulse --json` 可用，且真实跑通了 `codex app-server` 的握手与 `account/rateLimits/read`
+- [x] 无 `DISPLAY` 环境下上述命令可运行
+- [~] 对 Claude Code / Codex 输出**真实数值**：链路已验证到「凭据不足」这一步。本机只有 API key
+      没有 OAuth 登录，两个 provider 都如实报 `claudeLoginExpired` / `signInRequired`，
+      而直接对 `codex app-server` 发同一个请求得到的是
+      `chatgpt authentication required to read rate limits` —— 即结论准确而非移植缺陷。
+      要拿到真实数字需要人工跑一次 `codex login` / Claude Code 登录
+- [n/a] macOS 构建：本项目只支持 Linux（见「约束」）
+
+**新增的结论：阶段一无法验收「登录 + 取数全流程」。** 登录由设置窗口驱动（阶段二），
+当前 `--refresh` 只能用已存在的凭据。详见 `Docs/linux/cli.md` 的「无头登录：目前不存在」。
 
 **总工期估算：3–5 周**，其中 1.5（路径核对）和 1.6（provider 取数）是不可压缩的实测工作，占一半以上。
 

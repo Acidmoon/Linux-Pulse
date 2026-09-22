@@ -60,6 +60,8 @@ final class UsageStore {
     private var queued: Set<AccountKey> = []
     /// A whole pass asked for while one was running.
     private var queuedFullPass = false
+    /// Whether a finished pass arms the next one. See `init`.
+    private let schedulesNextPass: Bool
     /// When the pass in flight began, so one that never returns can be
     /// noticed rather than blocking every later attempt for ever.
     private var refreshStartedAt: Date?
@@ -94,7 +96,17 @@ final class UsageStore {
     /// celebrate one. Independent of the alert rules; see `ResetWatch`.
     private let resetWatch = ResetWatch()
 
-    init(settings: AppSettings, alerts: UsageAlerts? = nil, activity: AgentActivityMonitor = AgentActivityMonitor()) {
+    /// - Parameter schedulesNextPass: false for `pulse --refresh`, which runs
+    ///   one pass and exits. Scheduling a timer there is not merely useless —
+    ///   it is a timer added to a run loop whose thread is about to exit, which
+    ///   Foundation logs as an error on the way out.
+    init(
+        settings: AppSettings,
+        alerts: UsageAlerts? = nil,
+        activity: AgentActivityMonitor = AgentActivityMonitor(),
+        schedulesNextPass: Bool = true
+    ) {
+        self.schedulesNextPass = schedulesNextPass
         self.settings = settings
         self.activity = activity
         networkProxy = settings.networkProxy
@@ -356,6 +368,60 @@ final class UsageStore {
         }
     }
 
+    /// Who is waiting for the rail to settle.
+    ///
+    /// `pulse --refresh` has no run loop to watch the store from, so it waits
+    /// here instead. A list rather than a single continuation: there is one
+    /// waiter today, and a second one being quietly dropped reads as a hang.
+    private var idleWaiters: [CheckedContinuation<Bool, Never>] = []
+
+    /// Resolves when no pass is running and nothing is queued, or false if
+    /// `deadline` passes first.
+    ///
+    /// The deadline is not a nicety. A provider whose request never returns
+    /// would otherwise leave the command running until something kills it, and
+    /// the point of asking is to be told something either way — what arrived is
+    /// still in the cache, and `--json` will print it.
+    func idle(within deadline: Duration) async -> Bool {
+        if isSettled { return true }
+
+        let timeout = Task { [weak self] in
+            // `do`/`catch` rather than `try?`: a cancelled sleep must not fall
+            // through to the timeout, or every settled pass would also report
+            // itself as timed out a moment later.
+            do { try await Task.sleep(for: deadline) } catch { return }
+            self?.giveUpWaiting()
+        }
+        defer { timeout.cancel() }
+
+        return await withCheckedContinuation { continuation in
+            idleWaiters.append(continuation)
+        }
+    }
+
+    /// Nothing running and nothing waiting to run.
+    private var isSettled: Bool {
+        !isRefreshing && queued.isEmpty && !queuedFullPass
+    }
+
+    private func giveUpWaiting() {
+        guard !isSettled else { return }
+        resolveWaiters(with: false)
+    }
+
+    /// Called wherever a pass ends, so a waiter is released by the rail going
+    /// quiet rather than by a clock.
+    private func settle() {
+        guard isSettled, !idleWaiters.isEmpty else { return }
+        resolveWaiters(with: true)
+    }
+
+    private func resolveWaiters(with settled: Bool) {
+        let waiters = idleWaiters
+        idleWaiters.removeAll()
+        for waiter in waiters { waiter.resume(returning: settled) }
+    }
+
     func stop() {
         timer?.invalidate()
         timer = nil
@@ -608,6 +674,7 @@ final class UsageStore {
             self.refreshStartedAt = nil
             self.refreshingAccount = nil
             self.runQueued()
+            self.settle()
 
             // Compare the windows only. `observedAt` moves on every successful
             // fetch, so including it would report a change every single time
@@ -748,6 +815,7 @@ final class UsageStore {
             self.refreshingAccount = nil
             self.scheduleNext()
             self.runQueued()
+            self.settle()
         }
     }
 
@@ -903,6 +971,7 @@ final class UsageStore {
     // MARK: - The loop
 
     private func scheduleNext() {
+        guard schedulesNextPass else { return }
         timer?.invalidate()
         guard !settings.needsProviderSelection else { return }
 
