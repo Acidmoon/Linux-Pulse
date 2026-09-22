@@ -8,9 +8,26 @@ import FoundationNetworking
 
 /// Kimi Code's limits, from its own documented usage endpoint.
 ///
-/// Reached with a key the user pastes into Settings, kept encrypted on this Mac —
-/// the same arrangement as OpenCode Go, and for now without the fallback to a
-/// credential another tool stored.
+/// Two places the credential can come from, in this order:
+///
+/// 1. **A key pasted into Settings**, kept encrypted on this Mac. It wins, for
+///    the reason OpenCode Go's does: someone who typed a key meant that one to
+///    be used, and a stale token the CLI left behind must not override a
+///    deliberate choice.
+/// 2. **What the Kimi Code CLI saved for itself** in
+///    `~/.kimi-code/credentials/kimi-code.json` — the same borrowing Claude
+///    Code, Codex, Grok, Command Code and OpenCode Go get.
+///
+/// The fallback was left out on purpose once ("for now without the fallback to
+/// a credential another tool stored"). It is here now because of what that
+/// omission cost on Linux: the paste field lives in the settings window, so on
+/// a platform without one `kimiCode` could not be configured **at all** — the
+/// only one of the twenty that no command could reach. See
+/// [Docs/linux/cli.md](../../Docs/linux/cli.md).
+///
+/// **The endpoint takes either.** A Kimi Code API key and the CLI's OAuth
+/// access token are both accepted as a bearer token, which is why one route
+/// serves both and why the token being the CLI's is not a special case.
 ///
 /// The reply has **two kinds of limit in it and they are not the same figure**:
 ///
@@ -29,8 +46,165 @@ struct KimiCodeUsageService: Sendable {
 
     private static let endpoint = URL(string: "https://api.kimi.com/coding/v1/usages")!
 
+    /// One place a Kimi Code login can be found.
+    ///
+    /// `expiryIsMilliseconds` is per source rather than assumed, because the
+    /// two disagree — measured on a machine holding both: Pi's `expires` is
+    /// 1790077936089 and the CLI's `expires_at` is 1786525383, for expiries two
+    /// months apart. Reading either one on the other's scale is not a small
+    /// error: in seconds the millisecond value is the year 58691, so an expired
+    /// token would look usable for ever.
+    struct LoginSource: Sendable {
+        let file: URL
+        /// The keys to walk to reach the token, outermost first.
+        let tokenPath: [String]
+        let expiryPath: [String]
+        let expiryIsMilliseconds: Bool
+    }
+
+    /// A usable-looking login, and when it stops being one.
+    struct Login: Equatable {
+        let token: String
+        /// Nil when the store did not say, which is treated as usable: see
+        /// `storedLogin`.
+        let expiresAt: Date?
+    }
+
+    /// Every store Pulse will look in, and nothing about which wins —
+    /// `storedLogin` decides that by date.
+    ///
+    /// Two, because the login can be in either: the Kimi Code CLI writes one,
+    /// and Pi writes the other. **They are not copies of each other** — the
+    /// tokens differ in length and in value on the machine this was measured
+    /// on — so which one is current depends on which tool was used last, and
+    /// that is not something to hardcode.
+    ///
+    /// Pi is not a stranger here: upstream already reads its session logs for
+    /// the token-spend panes (`PiFamilySessionReader`), which is the same
+    /// relationship Claude Code, Codex, Grok, Command Code and OpenCode Go
+    /// have with their own stores.
+    static func loginSources(home: URL) -> [LoginSource] {
+        [
+            LoginSource(
+                file: home.appending(path: ".pi/agent/auth.json"),
+                tokenPath: ["kimi-coding", "access"],
+                expiryPath: ["kimi-coding", "expires"],
+                expiryIsMilliseconds: true
+            ),
+            LoginSource(
+                // Not `~/.kimi/…`: that is the older path, and this build keeps
+                // everything under a directory named after the product —
+                // measured on a machine with it installed, where `~/.kimi` does
+                // not exist at all.
+                file: home.appending(path: ".kimi-code/credentials/kimi-code.json"),
+                tokenPath: ["access_token"],
+                expiryPath: ["expires_at"],
+                expiryIsMilliseconds: false
+            ),
+        ]
+    }
+
+    /// The login to use, and whether there is one worth using.
+    ///
+    /// **The freshest usable token wins**, rather than the first store in some
+    /// order. There is no reason to prefer one tool's login over another's —
+    /// both are borrowed, neither is the user's declared choice (a pasted key
+    /// is, and is checked before this) — and a token that is still good is
+    /// strictly better than one that is not.
+    ///
+    /// **Nothing here refreshes anything, deliberately.** Both stores hold a
+    /// refresh token beside the access token, and OAuth refresh tokens rotate:
+    /// spending one would invalidate the copy the tool that owns it is holding,
+    /// signing the user out of Pi or out of the CLI. An expired token is
+    /// reported as expired and left alone, and renewing it is the owning tool's
+    /// job — which is why `.expired` exists as its own answer rather than being
+    /// reported as a refused key.
+    ///
+    /// A store with no expiry field is treated as usable rather than as
+    /// expired. The field belongs to the other tool, and refusing a token over
+    /// a field Pulse does not own is a worse failure than letting the endpoint
+    /// answer 401.
+    static func storedLogin(now: Date = Date(), home: URL = URL(fileURLWithPath: NSHomeDirectory())) -> Credential {
+        let found = loginSources(home: home).compactMap(login)
+
+        guard !found.isEmpty else { return .missing }
+
+        let usable = found.filter { login in
+            guard let expiry = login.expiresAt else { return true }
+            return expiry > now
+        }
+
+        // Nil sorts as the far future so that a store which did not state an
+        // expiry is not beaten by one that did — it cannot be shown to have
+        // expired, which is the whole test being applied.
+        guard let best = usable.max(by: {
+            ($0.expiresAt ?? .distantFuture) < ($1.expiresAt ?? .distantFuture)
+        }) else {
+            return .expired
+        }
+
+        return .token(best.token)
+    }
+
+    private static func login(at source: LoginSource) -> Login? {
+        guard
+            let data = try? Data(contentsOf: source.file),
+            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let token = value(in: root, at: source.tokenPath) as? String,
+            !token.isEmpty
+        else { return nil }
+
+        var expiresAt: Date?
+        if let raw = value(in: root, at: source.expiryPath) as? NSNumber {
+            let seconds = source.expiryIsMilliseconds ? raw.doubleValue / 1000 : raw.doubleValue
+            expiresAt = Date(timeIntervalSince1970: seconds)
+        }
+
+        return Login(token: token, expiresAt: expiresAt)
+    }
+
+    private static func value(in root: [String: Any], at path: [String]) -> Any? {
+        var node: Any = root
+        for key in path {
+            guard let dictionary = node as? [String: Any], let next = dictionary[key] else {
+                return nil
+            }
+            node = next
+        }
+        return node
+    }
+
+    /// What the credential lookup found.
+    ///
+    /// `expired` is its own case rather than folded into "missing", because the
+    /// two want different instructions: no file means signing in to the CLI
+    /// first, whereas a token that has run out means running the CLI once.
+    /// Reading a stale token as a refused key would send someone looking for a
+    /// key to replace when what they have is a login that needs renewing.
+    enum Credential: Equatable {
+        case token(String)
+        case expired
+        case missing
+    }
+
     func fetch() async -> ProviderUsage {
-        guard let key = enteredKey.flatMap({ $0.isEmpty ? nil : $0 }) else {
+        let credential: Credential
+        if let entered = enteredKey.flatMap({ $0.isEmpty ? nil : $0 }) {
+            credential = .token(entered)
+        } else {
+            credential = Self.storedLogin()
+        }
+
+        let key: String
+        switch credential {
+        case .token(let token):
+            key = token
+        // The CLI renews this token while it is being used and nothing renews
+        // it for Pulse, so an installation that has not run `kimi` in a while
+        // lands here rather than at a 401.
+        case .expired:
+            return .unavailable(.kimiCode, reason: .kimiLoginExpired)
+        case .missing:
             return .unavailable(.kimiCode, reason: .apiKeyMissing)
         }
 

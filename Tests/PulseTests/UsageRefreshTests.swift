@@ -15,12 +15,20 @@ import Testing
 @Suite("Usage store idle")
 @MainActor
 struct UsageStoreIdleTests {
-    /// A store with `kimiCode` switched on and no key entered.
+    /// A store with `deepSeek` switched on and no key entered.
     ///
-    /// Chosen because it fails **without a network**: a provider that keeps its
-    /// own credential and has none reports `.apiKeyMissing` locally, so a pass
-    /// over it runs to completion in milliseconds. That is what makes the
-    /// "finished" path reachable in a test.
+    /// Chosen because it fails **without a network and without reading
+    /// anything**: a provider that keeps its own credential and has none
+    /// reports `.apiKeyMissing` locally, so a pass over it completes in
+    /// milliseconds. That is what makes the "finished" path reachable in a test.
+    ///
+    /// **Not `kimiCode`, which this used to use.** Kimi Code borrows a login
+    /// from another tool when no key is pasted, so a test that enabled it was
+    /// reading whichever credential stores the machine running the suite
+    /// happens to have — and would have made a real request to Kimi if one of
+    /// them were current. A test that configures itself from the developer's
+    /// home directory is not testing anything; it went unnoticed until the
+    /// borrowing was added, and this comment is here so it is not added back.
     private func store(provider: Provider) -> UsageStore {
         let settings = AppSettings(
             enabledAccounts: [provider.rawValue],
@@ -55,7 +63,7 @@ struct UsageStoreIdleTests {
     /// is asserted. A regression here would otherwise look like a slow machine.
     @Test("The end of a pass releases the waiter, not the deadline")
     func passEndReleasesTheWaiter() async {
-        let store = self.store(provider: .kimiCode)
+        let store = self.store(provider: .deepSeek)
         let started = ContinuousClock.now
 
         store.refresh()
@@ -72,11 +80,11 @@ struct UsageStoreIdleTests {
     /// on the account set.
     @Test("The pass leaves a reading behind for the account it asked")
     func passLeavesAReading() async {
-        let store = self.store(provider: .kimiCode)
+        let store = self.store(provider: .deepSeek)
         store.refresh()
         _ = await store.idle(within: .seconds(60))
 
-        let reading = store.usage(for: AccountKey(.kimiCode))
+        let reading = store.usage(for: AccountKey(.deepSeek))
         #expect(reading.observedAt == nil, "a provider with no key reported a reading")
         guard case .unavailable(let reason) = reading.state else {
             Issue.record("expected an unavailable reading, got \(reading.state)")

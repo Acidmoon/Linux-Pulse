@@ -24,6 +24,9 @@ enum ConnectionRemedy: Equatable {
         case .signInRequired: return .copyCommand("codex login")
         case .kiroSignInRequired: return .copyCommand("kiro-cli login")
         case .grokSignInRequired, .grokLoginExpired: return .copyCommand("grok")
+        // The token is the CLI's, so renewing it is a command rather than a
+        // credential field — the same shape as Grok's and Claude Code's.
+        case .kimiLoginExpired: return .copyCommand("kimi")
         case .volcengineSignInRequired: return .copyCommand("arkcli auth login")
         case .claudeDesktopNotSignedIn, .claudeDesktopSessionExpired: return .openApp("Claude")
         case .cursorSignInRequired, .cursorLoginExpired: return .openApp("Cursor")

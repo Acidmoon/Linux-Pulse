@@ -85,8 +85,16 @@ Cursor / Grok Bot / Devin 读的是别的程序存的登录，Antigravity / Kiro
 发起者是设置里的一个按钮。设置窗口属于阶段二。所以今天 `--refresh` **只能用已经存在的凭据**：
 
 - 能读的：`~/.claude/.credentials.json`、`~/.codex/auth.json`、`~/.grok/auth.json`、
-  `~/.commandcode/auth.json`、`~/.config/*` 下的既有 key，以及 `keys.dat` 里粘贴过的 key
-- 不能做的：新登录、刷新过期的 OAuth token
+  `~/.commandcode/auth.json`、`~/.pi/agent/auth.json`（Kimi Code）、
+  `~/.kimi-code/credentials/kimi-code.json`（Kimi Code CLI）、`~/.config/*` 下的既有 key，
+  以及 `keys.dat` 里粘贴过的 key
+- 不能做的：新登录、**刷新**过期的 OAuth token
+
+  「不刷新」是刻意的：两个 Kimi 凭据存储都在 access token 旁边放了 refresh token，
+  而 OAuth 的 refresh token 会轮换——花掉一个会让持有它的那个工具手里那份失效，
+  等于把人从 Pi 或 CLI 里踢出去。所以过期就报过期（`kimiLoginExpired`），续期是拥有者的活。
+  Kimi Code 的两个存储**同时读、取更新的那个**，因为两者单位不同（Pi 用毫秒、CLI 用秒）
+  且 token 不同——实测为 648 与 677 字符、值也不同。
 
 在实测机器上的表现（这台机器有 `claude` 与 `codex` 两个 CLI，但只有 API key）：
 

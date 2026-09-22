@@ -31,7 +31,11 @@ extension Provider {
             .localized("Uses a browser session you import in Settings. Importing may ask for browser Keychain access.")
         case .copilot:
             .localized("Uses the GitHub login you connect in Settings. No Keychain prompt.")
-        case .kimiCode, .zai, .minimax, .minimaxCN, .deepSeek:
+        // No longer "only the API key you enter": the CLI's saved login is
+        // tried first, which is what the other borrow-a-login providers say.
+        case .kimiCode:
+            .localized("Uses the login the Kimi Code CLI saved, or a key you enter in Settings.")
+        case .zai, .minimax, .minimaxCN, .deepSeek:
             .localized("Uses only the API key you enter in Settings. No Keychain prompt.")
         }
     }

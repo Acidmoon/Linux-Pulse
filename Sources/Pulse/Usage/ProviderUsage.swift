@@ -424,6 +424,13 @@ struct ProviderUsage: Identifiable, Equatable, Sendable {
         /// while it is used and nothing renews it for Pulse, so the remedy is
         /// to use Grok, exactly as with Cursor.
         case grokLoginExpired
+        /// There is a login and it has aged out — the Kimi Code CLI's own.
+        ///
+        /// Its own case rather than `.signedOut`, which names no provider and
+        /// offers "sign in from Settings": Kimi has no sign-in Pulse can drive,
+        /// and the remedy is to run a command. Same shape as Grok's, whose
+        /// token is also renewed by using its tool.
+        case kimiLoginExpired
         /// A plan that simply does not include Grok Bot. Not a failure to
         /// report anything — a complete answer, and "no limits reported"
         /// would send someone looking for a fault that is not there.
@@ -516,6 +523,7 @@ struct ProviderUsage: Identifiable, Equatable, Sendable {
             case .antigravityNotAnswering: .localized("Antigravity is open but didn't answer. Restarting it usually helps.")
             case .cursorSignInRequired: .localized("Sign in to Cursor to see usage.")
             case .cursorLoginExpired: .localized("Cursor's saved login was refused. Open Cursor to renew it.")
+            case .kimiLoginExpired: .localized("Kimi Code's saved login expired. Run the Kimi Code CLI to renew it.")
             case .grokSignInRequired: .localized("Sign in to Grok to see usage.")
             case .grokLoginExpired: .localized("Grok's saved login expired. Use Grok to renew it.")
             case .grokBotNotIncluded: .localized("This Cursor plan doesn't include Grok Bot.")
