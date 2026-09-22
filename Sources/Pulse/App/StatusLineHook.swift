@@ -88,22 +88,24 @@ enum StatusLineHook {
               !command.isEmpty
         else { return nil }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", command]
+        // Through `Subprocess`, which writes the input on its own thread and
+        // closes the write end to give the child its EOF. The `Process` version
+        // wrote first and then read, which deadlocks on a status line that
+        // answers before consuming all of its input.
+        guard
+            let outcome = try? Subprocess.run(
+                URL(fileURLWithPath: "/bin/sh"),
+                ["-c", command],
+                input: input,
+                // A status line runs on every terminal redraw, so it is the
+                // one child here that must not be able to outlast its welcome.
+                deadline: 5,
+                outputCeiling: 64 * 1024
+            ),
+            outcome.succeeded
+        else { return nil }
 
-        let stdin = Pipe(), stdout = Pipe()
-        process.standardInput = stdin
-        process.standardOutput = stdout
-        process.standardError = FileHandle.nullDevice
-
-        guard (try? process.run()) != nil else { return nil }
-        stdin.fileHandleForWriting.write(input)
-        try? stdin.fileHandleForWriting.close()
-
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        return String(data: data, encoding: .utf8)
+        return String(data: outcome.standardOutput, encoding: .utf8)
     }
 
     /// What Pulse shows when it owns the status line outright: the two limits,

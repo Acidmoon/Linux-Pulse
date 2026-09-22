@@ -17,5 +17,6 @@ A decision records a reason, not proof the measurement still holds — a local p
 | [sdk-stamp-and-appearance.md](sdk-stamp-and-appearance.md) | [../releasing.md](../releasing.md) |
 | [localization.md](localization.md) | [../development.md](../development.md) |
 | [bot-mark-geometry.md](bot-mark-geometry.md) | [../ui/rings-and-surface.md](../ui/rings-and-surface.md) |
+| [linux-subprocess.md](linux-subprocess.md) | [../linux/subprocess.md](../linux/subprocess.md) |
 
 When the *reason* changes, edit the decision. When only the current fact changes (counts, intervals), edit the topic doc.

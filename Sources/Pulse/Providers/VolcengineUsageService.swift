@@ -213,188 +213,46 @@ struct VolcengineUsageService: Sendable {
         }
     }
 
+    /// Runs `arkcli` and returns what it wrote.
+    ///
+    /// Everything the pipes, the deadline and the process group need is in
+    /// `Subprocess`, which exists because Foundation's `Process` cannot do
+    /// these reliably on this platform — see `Docs/decisions/linux-subprocess.md`.
+    /// What stays here is only what is Volcengine's: which failure means the
+    /// CLI is not installed, and which stderr phrases mean a login is needed.
     private static func blocking(
         _ binary: URL,
         _ arguments: [String],
         deadline: TimeInterval
     ) -> Result<Data, Refusal> {
-        let process = Process()
-        process.executableURL = binary
-        process.arguments = arguments
-        process.environment = NetworkSession.subprocessEnvironment()
-        // Nothing to answer with, so a CLI that asks gets EOF rather than
-        // blocking on a terminal that is not there.
-        process.standardInput = FileHandle.nullDevice
-
-        let out = Pipe()
-        let err = Pipe()
-        process.standardOutput = out
-        process.standardError = err
-
-        // **Never `waitUntilExit()`.** It has no timeout, and bounding only the
-        // readers moved the hang rather than removing it: a child that ignores
-        // SIGTERM, or one that closes its pipes and keeps running, sailed past
-        // the deadline and parked here for ever. The handler is set before the
-        // process starts so an exit cannot be missed between the two.
-        let exited = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in exited.signal() }
-
+        let outcome: Subprocess.Outcome
         do {
-            try process.run()
+            outcome = try Subprocess.run(
+                binary,
+                arguments,
+                environment: NetworkSession.subprocessEnvironment(),
+                deadline: deadline,
+                outputCeiling: outputCeiling
+            )
         } catch {
             return .failure(Refusal(reason: .volcengineCLIMissing))
         }
 
-        // Darwin Foundation normally creates a group led by the child. Verify
-        // it before signalling a group, and never target Pulse's own group.
-        // A fast-exiting leader may already be reaped while its group survives.
-        // That last check confirms a group with this id exists *now*; a pid
-        // freed and reused before `stop()` would be somebody else's. It needs
-        // the child reaped, the pid reissued within milliseconds, and the new
-        // owner to be a group leader — accepted against leaving descendants
-        // running, which is what this branch is for.
-        let pid = process.processIdentifier
-        let ownGroup = getpgrp()
-        let reportedGroup = getpgid(pid)
-        let hasGroup = reportedGroup == pid
-            || (reportedGroup == -1 && errno == ESRCH && kill(-pid, 0) == 0)
-        let processGroup = pid > 1 && pid != ownGroup && hasGroup ? pid : nil
-
-        let collected = Collected()
-        let readers = DispatchGroup()
-
-        #if canImport(Darwin)
-        for (pipe, isStandardOutput) in [(out, true), (err, false)] {
-            readers.enter()
-            // **A handler, not a blocking read loop.** A loop parks a thread
-            // per pipe, and a grandchild inheriting the write end keeps it
-            // parked after this call has given up — a leak that repeats until
-            // libdispatch's per-QoS thread cap starves everything else. A
-            // handler holds no thread: if the far end never closes, it simply
-            // stops being called.
-            pipe.fileHandleForReading.readabilityHandler = { handle in
-                let chunk = handle.availableData
-                guard !chunk.isEmpty else {
-                    // EOF. Clearing the handler is what releases the file
-                    // descriptor, and `leave` must happen exactly once.
-                    handle.readabilityHandler = nil
-                    readers.leave()
-                    return
-                }
-                collected.append(chunk, toStandardOutput: isStandardOutput, ceiling: outputCeiling)
-            }
-        }
-
-        /// Detaches from both pipes. Anything still holding a write end is no
-        /// longer this call's problem, and nothing is left blocked on it.
-        func releasePipes() {
-            out.fileHandleForReading.readabilityHandler = nil
-            err.fileHandleForReading.readabilityHandler = nil
-        }
-        #else
-        // **Not `readabilityHandler`, which does not work here.** Measured on
-        // this platform: with a child writing more than a pipe buffer, the
-        // descriptor carrying the bulk never delivers EOF through a
-        // readability handler — the other one does, immediately, so the read
-        // group waits out the whole deadline on a process that has already
-        // exited. It is a race, so which of the two pipes stalls changes run
-        // to run, and one run ended in a crash inside `_dispatch_event_loop_drain`.
-        // The same pipeline through a blocking read returns in 0.01s, every
-        // time, which is why this is a poll loop instead.
-        //
-        // `poll` with a slice rather than a bare `read`: a grandchild can hold
-        // a write end open after this call has given up, and a blocking read
-        // would park a thread on it for the life of the process. The slice lets
-        // the loop notice `releasePipes` and leave, so no thread outlives the
-        // call and nothing is stranded — the property the handler was chosen
-        // for, reached a different way.
-        let abandoned = Abandoned()
-        let pipeQueue = DispatchQueue(
-            label: "com.pulse.volcengine.pipes",
-            attributes: .concurrent
-        )
-
-        for (pipe, isStandardOutput) in [(out, true), (err, false)] {
-            readers.enter()
-            let descriptor = pipe.fileHandleForReading.fileDescriptor
-            pipeQueue.async {
-                defer { readers.leave() }
-                var buffer = [UInt8](repeating: 0, count: 64 * 1024)
-                while !abandoned.isSet {
-                    var interest = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
-                    let ready = poll(&interest, 1, 200)
-                    // A negative return is an error and a zero return is the
-                    // slice expiring; neither is EOF, so both go round again
-                    // until the descriptor speaks or the call gives up.
-                    guard ready > 0 else { continue }
-                    let count = read(descriptor, &buffer, buffer.count)
-                    // 0 is EOF; negative is an error. Either way this pipe has
-                    // nothing more to say.
-                    guard count > 0 else { return }
-                    collected.append(
-                        Data(buffer[0..<count]),
-                        toStandardOutput: isStandardOutput,
-                        ceiling: outputCeiling
-                    )
-                }
-            }
-        }
-
-        /// Tells the read loops to stop. They leave within one poll slice, so
-        /// a pipe no one will ever close cannot hold a thread past this call.
-        func releasePipes() {
-            abandoned.set()
-        }
-        #endif
-
-        /// SIGTERM, then SIGKILL, then give up — each bounded. `terminate()`
-        /// alone is a request, and a CLI with a stuck graceful-shutdown path
-        /// is exactly the thing being escaped from.
-        func stop() {
-            if let processGroup {
-                kill(-processGroup, SIGTERM)
-                let until = DispatchTime.now() + 2
-                // The leader exiting is not enough: a descendant can retain
-                // the pipes and ignore TERM. Give the whole group its grace.
-                while kill(-processGroup, 0) == 0, DispatchTime.now() < until {
-                    Thread.sleep(forTimeInterval: 0.02)
-                }
-                if kill(-processGroup, 0) == 0 { kill(-processGroup, SIGKILL) }
-                _ = exited.wait(timeout: .now() + 2)
-                return
-            }
-            process.terminate()
-            guard exited.wait(timeout: .now() + 2) == .timedOut else { return }
-            kill(process.processIdentifier, SIGKILL)
-            _ = exited.wait(timeout: .now() + 2)
-        }
-
-        if readers.wait(timeout: .now() + deadline) == .timedOut {
-            stop()
-            // A moment for the readers to see the pipes close, and no more.
-            _ = readers.wait(timeout: .now() + 1)
-            releasePipes()
+        // A deadline is not a failure of the tool, so it does not go through
+        // `reason(forExitOf:)` — that would read an empty stderr and decide
+        // the reply was unreadable, which names the wrong problem.
+        guard !outcome.timedOut else {
             return .failure(Refusal(reason: .unreachable))
         }
 
-        // The pipes are closed, which is not the same as the process being
-        // gone — it can hold both open through a child of its own, or simply
-        // close them and carry on.
-        if exited.wait(timeout: .now() + 2) == .timedOut {
-            stop()
-            releasePipes()
-            return .failure(Refusal(reason: .unreachable))
-        }
-
-        releasePipes()
-        let (data, problem) = collected.taken()
-
-        guard process.terminationStatus == 0 else {
+        guard outcome.succeeded else {
+            let problem = String(data: outcome.standardError, encoding: .utf8) ?? ""
             return .failure(Refusal(reason: Self.reason(forExitOf: problem)))
         }
 
-        return .success(data)
+        return .success(outcome.standardOutput)
     }
+
 
     /// Why a non-zero exit happened, as far as it can honestly be told.
     ///
@@ -777,52 +635,4 @@ extension VolcengineUsageService {
     }
 }
 
-/// The two pipes' bytes, written from two queues and read once after both have
-/// finished. The lock is what makes that safe; the `DispatchGroup` is what
-/// makes "after both have finished" true.
-/// Whether the call has given up on the pipes.
-///
-/// A poll loop outside macOS needs a way to be told to stop, because it may be
-/// watching a write end a grandchild is holding open and nothing else will ever
-/// end it. A plain flag under a lock: it is written once and read on a 200ms
-/// slice, so there is nothing here worth a faster primitive.
-private final class Abandoned: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value = false
 
-    var isSet: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return value
-    }
-
-    func set() {
-        lock.lock()
-        value = true
-        lock.unlock()
-    }
-}
-
-private final class Collected: @unchecked Sendable {
-    private let lock = NSLock()
-    private var standardOutput = Data()
-    private var standardError = Data()
-
-    func append(_ chunk: Data, toStandardOutput: Bool, ceiling: Int) {
-        lock.lock()
-        defer { lock.unlock() }
-        // Past the ceiling the bytes are dropped, never the reading — see
-        // `VolcengineUsageService.blocking`.
-        if toStandardOutput {
-            if standardOutput.count < ceiling { standardOutput.append(chunk) }
-        } else if standardError.count < ceiling {
-            standardError.append(chunk)
-        }
-    }
-
-    func taken() -> (output: Data, problem: String) {
-        lock.lock()
-        defer { lock.unlock() }
-        return (standardOutput, String(data: standardError, encoding: .utf8) ?? "")
-    }
-}

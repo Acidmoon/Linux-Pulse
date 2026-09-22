@@ -214,24 +214,24 @@ struct AntigravityUsageService: Sendable {
             }
     }
 
+    /// Runs a short-lived helper and returns what it wrote.
+    ///
+    /// Through `Subprocess` rather than `Process`: this used to end in
+    /// `readDataToEndOfFile()` followed by `waitUntilExit()`, which has no
+    /// timeout at all — a `/bin/ps` that wedged would have parked the refresh
+    /// for ever. The deadline is what makes the loop above able to give up.
     private static func run(_ path: String, _ arguments: [String]) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = arguments
+        guard
+            let outcome = try? Subprocess.run(
+                URL(fileURLWithPath: path),
+                arguments,
+                deadline: 10,
+                outputCeiling: 256 * 1024
+            ),
+            outcome.succeeded
+        else { return nil }
 
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-        } catch {
-            return nil
-        }
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        return String(data: data, encoding: .utf8)
+        return String(data: outcome.standardOutput, encoding: .utf8)
     }
 
     // MARK: - Asking it

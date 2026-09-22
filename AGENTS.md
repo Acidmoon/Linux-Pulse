@@ -69,6 +69,15 @@
 - 不臆造 API 行为：对不确定的 Linux 桌面行为（如 Wayland 下的窗口定位限制），先实验再写结论。
 - 每完成一个阶段，用 git 提交并写清 commit message；最终交付完整 fork 仓库或可合并的分支。
 
+## 关键实现约定（必须遵守）
+
+**子进程一律走 `Sources/Pulse/Platform/Subprocess.swift`，不要用 Foundation 的 `Process`。**
+本平台的 `Process` 与 `readabilityHandler` 已实测有三处不可靠（大流量管道不投递 EOF、已死子进程不被 reap 导致 `isRunning` 永真、`terminationHandler` 不触发），
+Providers 的子进程封装曾逐个踩中。测量数据与取舍见 `Docs/decisions/linux-subprocess.md`，当前 API 与调用点见 `Docs/linux/subprocess.md`。
+
+**入口必须先调用 `Subprocess.ignoreSIGPIPE()`。** 往已关闭的管道写会触发 `SIGPIPE`，默认动作是终止进程——
+即子进程退出会把 Pulse 一起带走。macOS 侧在 `AppDelegate` 里做这件事，而那个文件在 Linux 上被排除。
+
 ## 环境备忘（Deepin 25 / x86_64）
 - OS：Deepin 25（`crimson`，Debian 系），glibc **2.38**
 - 当前会话：**X11**（`XDG_SESSION_TYPE=x11`，`DISPLAY=:0`）；Wayland 需另测

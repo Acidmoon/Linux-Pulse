@@ -15,13 +15,19 @@ actor CodexAppServer {
     /// Called when the server reports that limits changed.
     private var onRateLimitsChanged: (@Sendable () -> Void)?
 
-    private var process: Process?
-    private var stdin: FileHandle?
-    /// The handle the helper's stdout is read through, held so that a restart
-    /// or a shutdown can take its `readabilityHandler` off. **A handler left
-    /// on a closed pipe is a busy loop**, not a leak that merely wastes
-    /// memory — see `startReading`.
-    private var reader: FileHandle?
+    /// The helper, or nil when none is running.
+    ///
+    /// A `Subprocess.Child` rather than a `Process` plus a pair of pipes plus a
+    /// readability handler. The three properties that used to be here were the
+    /// shape issue #25 came from, and on Linux they could not be made to work:
+    /// a handler never delivered EOF on a busy pipe, and a child whose stdout
+    /// EOF it had seen was never reaped, so `isRunning` stayed true for a dead
+    /// process. See `Docs/decisions/linux-subprocess.md`.
+    ///
+    /// One object holds the pid, the stdin write end and the reading, which is
+    /// also why the identity guard that `readerClosed` needed has gone: there
+    /// is nothing left for a stale reader to be confused with.
+    private var child: Subprocess.Child?
     // Keep IDs unique across helper restarts, including callbacks already
     // queued on the actor when an old request was completed or cancelled.
     private var nextID = 1
@@ -34,11 +40,21 @@ actor CodexAppServer {
     private var pending: [Int: PendingRequest] = [:]
     private var buffer = Data()
     private let executable: URL?
+    private let arguments: [String]
     private let requestTimeout: Duration
 
-    // Tests use an isolated helper without changing PATH or touching a login.
-    init(executable: URL? = nil, requestTimeout: Duration = .seconds(20)) {
+    /// The arguments are a parameter so a test can drive this against `/bin/sh`
+    /// and a script. That is a real code path rather than a seam bolted on
+    /// beside it: the handshake, the framing, the restart and the EOF handling
+    /// all run exactly as they do with `codex app-server`, which is the only
+    /// way to test any of it without the tool installed and signed in.
+    init(
+        executable: URL? = nil,
+        arguments: [String] = ["app-server"],
+        requestTimeout: Duration = .seconds(20)
+    ) {
         self.executable = executable
+        self.arguments = arguments
         self.requestTimeout = requestTimeout
     }
 
@@ -69,21 +85,10 @@ actor CodexAppServer {
     }
 
     func shutDown() {
-        stopReading()
-        process?.terminate()
-        process = nil
-        stdin = nil
-        failAllPending()
-    }
-
-    /// Take the handler off the pipe we are done with.
-    ///
-    /// Terminating the child is not enough: the handler belongs to the file
-    /// handle, and a handle whose far end has closed stays readable for ever.
-    func stopReading() {
-        reader?.readabilityHandler = nil
-        reader = nil
+        child?.terminate()
+        child = nil
         buffer.removeAll(keepingCapacity: false)
+        failAllPending()
     }
 
     private func failAllPending() {
@@ -93,39 +98,48 @@ actor CodexAppServer {
     // MARK: - Process
 
     private func ensureRunning() async throws {
-        if let process, process.isRunning { return }
+        if let child, child.isRunning { return }
 
-        // **Before starting another one.** Getting here with a process set
-        // means the last one died, and its pipe is still wired to a handler.
-        // Without this, every restart left one more spinning thread behind:
-        // three of them was 290% of a CPU for eleven hours, with no child
-        // process left to blame (issue #25).
+        // **Before starting another one.** Getting here with a child set means
+        // the last one died or was shut down. Without this, every restart left
+        // one more reader behind: three of them was 290% of a CPU for eleven
+        // hours, with no child process left to blame (issue #25).
         shutDown()
 
         guard let executable = executable ?? Self.locateCodex() else { throw Failure.executableNotFound }
 
-        let process = Process()
-        process.executableURL = executable
-        process.arguments = ["app-server"]
-        process.environment = NetworkSession.subprocessEnvironment()
-
-        let input = Pipe(), output = Pipe()
-        process.standardInput = input
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-
-        let reader = output.fileHandleForReading
-        startReading(reader)
-
+        let child: Subprocess.Child
         do {
-            try process.run()
+            child = try Subprocess.Child(
+                executable: executable,
+                arguments: arguments,
+                environment: NetworkSession.subprocessEnvironment()
+            )
         } catch {
-            stopReading()
             throw Failure.startFailed
         }
 
-        self.process = process
-        self.stdin = input.fileHandleForWriting
+        // Set before `start()`, or a chunk that arrives in between is dropped.
+        child.onOutput = { [weak self] chunk in
+            Task { await self?.consume(chunk) }
+        }
+        // EOF, or a child that died: either way nothing more will answer, so
+        // everything still waiting is failed now rather than at the twenty
+        // second timeout — and the child is terminated rather than forgotten,
+        // because EOF on stdout can also mean a helper that is still running
+        // with its output closed.
+        child.onExit = { [weak self] _ in
+            Task { await self?.helperGone() }
+        }
+        // EOF on stdout is **not** the same as the helper exiting: it can close
+        // its output and carry on. Dropping the child there would leave it
+        // running with nothing able to kill it, so it is terminated — and
+        // terminating is also what makes `onExit` fire next.
+        child.onOutputClosed = { [weak self] in
+            Task { await self?.outputClosed() }
+        }
+        child.start()
+        self.child = child
 
         // The protocol opens with a handshake before anything else is accepted.
         _ = try await send(
@@ -135,67 +149,20 @@ actor CodexAppServer {
         notify(method: "initialized")
     }
 
-    /// Read the helper's stdout, and stop the moment it closes.
-    ///
-    /// **An empty `availableData` is EOF, and the handler must come off right
-    /// there.** A pipe whose far end has closed is readable for ever, so a
-    /// handler that merely returns is called again immediately, and again,
-    /// for as long as the app runs — one core, flat out, for something that
-    /// has already finished. Returning without clearing it is what issue #25
-    /// was: 290% of a CPU for eleven hours after `codex app-server` exited.
-    ///
-    /// Cleared **on this queue**, synchronously, rather than by hopping to the
-    /// actor. The hop is the whole window the loop needs: the fd stays
-    /// readable until the handler is gone, and the handler is not gone until
-    /// the actor gets round to it.
-    ///
-    /// `VolcengineUsageService` has done this correctly since it was written;
-    /// this path simply never learned it.
-    // Not private: `CodexAppServerTests` drives these against a plain pipe,
-    // because the invariant they carry cannot be checked from the outside and
-    // the cost of getting it wrong is a core at 100% for as long as the app
-    // runs.
-    func startReading(_ reader: FileHandle) {
-        self.reader = reader
-        reader.readabilityHandler = { [weak self] handle in
-            let chunk = handle.availableData
-            guard !chunk.isEmpty else {
-                handle.readabilityHandler = nil
-                Task { await self?.readerClosed(handle) }
-                return
-            }
-            Task { await self?.consume(chunk, from: handle) }
-        }
+    /// The helper's stdout reached EOF, which it can do while still running.
+    private func outputClosed() {
+        child?.terminate()
+        shutDown()
     }
 
-    /// Take ownership of a helper and its pipe, for `CodexAppServerTests`.
+    /// The helper is finished, one way or another.
     ///
-    /// `ensureRunning` is the only caller in the app; a test cannot use it
-    /// without `codex` installed, and the invariant worth testing — that EOF
-    /// terminates rather than forgets — needs a real process to observe.
-    func adopt(_ process: Process, reader: FileHandle) {
-        self.process = process
-        startReading(reader)
-    }
-
-    /// The helper's stdout reached EOF: it has exited, or is exiting.
-    ///
-    /// Anything still waiting is waiting for a process that will not answer,
-    /// so it is failed now rather than at the twenty-second timeout — and the
-    /// handles are dropped so the next request starts a fresh helper instead
-    /// of writing into a dead pipe.
-    ///
-    /// Guarded on identity because a restart installs a new reader: the old
-    /// one's EOF must not tear down the helper that replaced it.
-    func readerClosed(_ handle: FileHandle) {
-        guard handle === reader else { return }
-        // **Terminated, not merely forgotten.** EOF on stdout usually means
-        // the helper exited, but it can also mean a helper that is still
-        // running with its output closed. Dropping the `Process` there leaves
-        // it with nothing able to kill it — not even `shutDown`, which
-        // terminates a `process` that is by then nil — so quitting Pulse would
-        // leave it behind. `terminate()` on one that has already exited is a
-        // no-op.
+    /// Called from `onExit`, which fires after the child has been reaped, so
+    /// `isRunning` and `exitCode` are both settled by the time this runs —
+    /// unlike the `Process` path, where a dead child could report itself alive
+    /// for ever.
+    private func helperGone() {
+        guard child?.isRunning != true else { return }
         shutDown()
     }
 
@@ -245,7 +212,7 @@ actor CodexAppServer {
         return try await withCheckedThrowingContinuation { continuation in
             // Nothing to write to means nothing will ever answer, and a
             // continuation nobody answers suspends its caller for ever.
-            guard let stdin else {
+            guard let child, child.isRunning else {
                 continuation.resume(throwing: Failure.startFailed)
                 return
             }
@@ -262,7 +229,7 @@ actor CodexAppServer {
                 finish(id, with: .failure(Failure.timedOut))
             }
             pending[id] = PendingRequest(continuation: continuation, timeout: timeout)
-            write(data, to: stdin)
+            write(data)
         }
     }
 
@@ -270,10 +237,10 @@ actor CodexAppServer {
         let message: [String: Any] = ["jsonrpc": "2.0", "method": method, "params": params]
         guard
             let data = try? JSONSerialization.data(withJSONObject: message),
-            let stdin
+            child != nil
         else { return }
 
-        write(data, to: stdin)
+        write(data)
     }
 
     /// One line to the helper's standard input; close the connection if it has gone.
@@ -286,13 +253,13 @@ actor CodexAppServer {
     /// (see `AppDelegate`) so the write returns an error instead; this is the
     /// half that then treats the error as "the helper is gone" rather than
     /// carrying on writing into a dead pipe.
-    private func write(_ data: Data, to handle: FileHandle) {
-        do {
-            try handle.write(contentsOf: data)
-            try handle.write(contentsOf: Data("\n".utf8))
-        } catch {
-            // Whatever is left of it is not usable, and the next call will
-            // start a fresh one.
+    private func write(_ data: Data) {
+        guard let child else { return }
+        var line = data
+        line.append(Data("\n".utf8))
+        // False means the write did not land. Whatever is left of the helper is
+        // not usable, and the next call will start a fresh one.
+        if !child.write(line) {
             shutDown()
         }
     }
@@ -305,8 +272,7 @@ actor CodexAppServer {
 
     /// Messages arrive as newline-delimited JSON, and a read can land
     /// mid-line, so hold the remainder until the next chunk completes it.
-    private func consume(_ chunk: Data, from source: FileHandle) {
-        guard source === reader else { return }
+    private func consume(_ chunk: Data) {
         buffer.append(chunk)
 
         while let newline = buffer.firstIndex(of: UInt8(ascii: "\n")) {

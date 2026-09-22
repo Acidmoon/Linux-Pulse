@@ -15,10 +15,14 @@ actor KiroACPClient {
         case server(String)
     }
 
-    private var process: Process?
-    private var stdin: FileHandle?
-    private var reader: FileHandle?
-    private var errorReader: FileHandle?
+    /// The helper, or nil when none is running.
+    ///
+    /// A `Subprocess.Child` rather than a `Process` and three pipes and two
+    /// readability handlers. On this platform a handler never delivered EOF on
+    /// a pipe that had carried bulk data, so a helper that wrote a partial line
+    /// and exited left this client waiting out its whole deadline instead of
+    /// reporting the connection closed. See `Docs/decisions/linux-subprocess.md`.
+    private var child: Subprocess.Child?
     // IDs belong to the client, not the child process: a timeout already
     // queued on this actor must never find a new request under its old ID.
     private var nextID = 1
@@ -55,13 +59,8 @@ actor KiroACPClient {
     }
 
     func shutDown() {
-        reader?.readabilityHandler = nil
-        errorReader?.readabilityHandler = nil
-        reader = nil
-        errorReader = nil
-        process?.terminate()
-        process = nil
-        stdin = nil
+        child?.terminate()
+        child = nil
         buffer.removeAll(keepingCapacity: false)
         failAllPending(with: .closed)
     }
@@ -69,30 +68,35 @@ actor KiroACPClient {
     private func start() throws {
         guard let executable = executable ?? Self.locateKiro() else { throw Failure.executableNotFound }
 
-        let process = Process()
-        process.executableURL = executable
-        process.arguments = ["acp", "--agent-engine", "v3", "--auth-method", "cli"]
-        process.environment = NetworkSession.subprocessEnvironment()
-
-        let input = Pipe(), output = Pipe(), errors = Pipe()
-        process.standardInput = input
-        process.standardOutput = output
-        process.standardError = errors
-
-        let reader = output.fileHandleForReading
-        let errorReader = errors.fileHandleForReading
-        startReading(reader)
-        drain(errorReader)
-
+        let child: Subprocess.Child
         do {
-            try process.run()
+            child = try Subprocess.Child(
+                executable: executable,
+                arguments: ["acp", "--agent-engine", "v3", "--auth-method", "cli"],
+                environment: NetworkSession.subprocessEnvironment()
+            )
         } catch {
-            shutDown()
             throw Failure.startFailed
         }
 
-        self.process = process
-        stdin = input.fileHandleForWriting
+        // Before `start()`, or a chunk that arrives in between is dropped.
+        child.onOutput = { [weak self] chunk in
+            Task { await self?.consume(chunk) }
+        }
+        // stderr is not read into anything — Kiro writes diagnostics there and
+        // nothing acts on them — but it still has to be drained, or a chatty
+        // helper fills the 64 KiB pipe and blocks writing. The `Child` does
+        // that with or without a handler set.
+        //
+        // EOF on stdout means the connection is gone, whether or not the process
+        // is. Terminating rather than only failing the pending requests is the
+        // same rule `CodexAppServer` follows: a helper with nothing to say must
+        // not be left resident with nobody able to kill it.
+        child.onOutputClosed = { [weak self] in
+            Task { await self?.shutDown() }
+        }
+        child.start()
+        self.child = child
     }
 
     private static func locateKiro() -> URL? {
@@ -127,7 +131,7 @@ actor KiroACPClient {
         }
 
         return try await withCheckedThrowingContinuation { continuation in
-            guard let stdin else {
+            guard let child, child.isRunning else {
                 continuation.resume(throwing: Failure.closed)
                 return
             }
@@ -137,52 +141,17 @@ actor KiroACPClient {
                 finish(id, with: .failure(Failure.timedOut))
             }
             pending[id] = PendingRequest(continuation: continuation, timeout: timeout)
-            do {
-                try stdin.write(contentsOf: data)
-                try stdin.write(contentsOf: Data("\n".utf8))
-            } catch {
+            var line = data
+            line.append(Data("\n".utf8))
+            // False means the write did not land, so whatever is left of the
+            // helper is not usable.
+            if !child.write(line) {
                 shutDown()
             }
         }
     }
 
-    private func startReading(_ handle: FileHandle) {
-        reader = handle
-        handle.readabilityHandler = { [weak self] handle in
-            let chunk = handle.availableData
-            guard !chunk.isEmpty else {
-                handle.readabilityHandler = nil
-                Task { await self?.readerClosed(handle) }
-                return
-            }
-            Task { await self?.consume(chunk, from: handle) }
-        }
-    }
-
-    private func drain(_ handle: FileHandle) {
-        errorReader = handle
-        handle.readabilityHandler = { [weak self] handle in
-            let chunk = handle.availableData
-            guard !chunk.isEmpty else {
-                handle.readabilityHandler = nil
-                Task { await self?.errorReaderClosed(handle) }
-                return
-            }
-        }
-    }
-
-    private func readerClosed(_ handle: FileHandle) {
-        guard handle === reader else { return }
-        shutDown()
-    }
-
-    private func errorReaderClosed(_ handle: FileHandle) {
-        guard handle === errorReader else { return }
-        errorReader = nil
-    }
-
-    private func consume(_ chunk: Data, from source: FileHandle) {
-        guard source === reader else { return }
+    private func consume(_ chunk: Data) {
         buffer.append(chunk)
         while let newline = buffer.firstIndex(of: UInt8(ascii: "\n")) {
             let line = buffer[buffer.startIndex..<newline]

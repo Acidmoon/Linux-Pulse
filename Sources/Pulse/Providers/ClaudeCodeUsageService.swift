@@ -226,7 +226,14 @@ struct ClaudeCodeUsageService: Sendable {
     /// uses. Note the first read can raise a permission prompt; the process is
     /// short-lived and its failure is handled, so a refused prompt degrades to
     /// the status line route rather than hanging the panel.
+    ///
+    /// **macOS only, and not a subprocess portability problem.** `/usr/bin/security`
+    /// is part of macOS; there is no Linux equivalent because there is no
+    /// Keychain there. Claude Code on Linux keeps its login in
+    /// `~/.claude/.credentials.json`, which `readCredentialsFile` beside this
+    /// reads, so the route exists either way — this one is simply absent.
     private func readKeychainCredentials() -> [String: Any]? {
+        #if canImport(Security)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
         process.arguments = ["find-generic-password", "-s", keychainService, "-w"]
@@ -242,6 +249,9 @@ struct ClaudeCodeUsageService: Sendable {
         guard process.terminationStatus == 0 else { return nil }
 
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        #else
+        return nil
+        #endif
     }
 
     private func readCredentialsFile() -> [String: Any]? {

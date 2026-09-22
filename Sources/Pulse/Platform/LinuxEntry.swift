@@ -28,6 +28,11 @@ import Foundation
 @main
 enum PulseLinuxMain {
     static func main() {
+        // Before anything can write to a child. A helper exiting closes its
+        // end of a pipe, and the write Pulse does next would kill it — macOS
+        // does this in `AppDelegate`, which is not built here.
+        Subprocess.ignoreSIGPIPE()
+
         if CommandLine.arguments.contains(StatusLineHook.modeArgument) {
             StatusLineHook.runAsStatusLine()
             exit(0)
