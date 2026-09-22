@@ -1,5 +1,11 @@
 import Foundation
+#if canImport(SQLite3)
 import SQLite3
+#else
+// The Linux toolchain ships no modulemap for SQLite; Sources/CSQLite
+// supplies one. See Package.swift.
+import CSQLite
+#endif
 
 /// The login Cursor already keeps on this Mac, turned into what its account
 /// pages ask for.

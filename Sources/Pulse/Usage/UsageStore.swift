@@ -1,4 +1,6 @@
+#if canImport(AppKit)
 import AppKit
+#endif
 import Foundation
 import Observation
 
@@ -948,7 +950,21 @@ final class UsageStore {
 
     /// The things that change how often it is worth asking, none of which
     /// arrive on their own schedule.
+    ///
+    /// Entirely Darwin: there is no Foundation equivalent of the display-sleep
+    /// and system-wake notifications, and `ProcessInfo.thermalState`,
+    /// `thermalStateDidChangeNotification` and `isLowPowerModeEnabled` are all
+    /// absent on Linux — verified by compiling each one, not assumed. So the
+    /// store simply has no observers there rather than being wired to
+    /// notifications that would never fire.
+    ///
+    /// What is given up is adaptive refresh reacting to a display going off or
+    /// a machine waking. The one-shot timer still runs, so the numbers still
+    /// move; they just do not get re-asked the instant a laptop lid opens.
+    /// `screensAsleep` stays false throughout, which is the correct reading of
+    /// a platform that cannot tell us otherwise.
     private func observe() {
+        #if canImport(AppKit)
         let workspace = NSWorkspace.shared.notificationCenter
 
         observers = [
@@ -974,6 +990,9 @@ final class UsageStore {
             observe(ProcessInfo.thermalStateDidChangeNotification) { $0.scheduleNext() },
             observe(.NSProcessInfoPowerStateDidChange) { $0.scheduleNext() }
         ]
+        #else
+        observers = []
+        #endif
     }
 
     private func observe(

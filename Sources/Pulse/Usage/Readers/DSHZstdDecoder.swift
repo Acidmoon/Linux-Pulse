@@ -1,4 +1,8 @@
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 import Foundation
 
 /// Streaming Zstandard decoding for DeepSeek Harness transcripts and any other

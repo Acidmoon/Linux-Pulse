@@ -1,6 +1,14 @@
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+// swift-crypto, Apple's cross-platform implementation of the same API.
+// See Package.swift for why Linux needs it.
+import Crypto
+#endif
 import Foundation
-import os
+#if canImport(os)
+import os       // unused today; kept so a Darwin-only
+#endif          // logger can be added without a platform check
 
 /// Read-only helpers for the files an agent leaves behind.
 ///

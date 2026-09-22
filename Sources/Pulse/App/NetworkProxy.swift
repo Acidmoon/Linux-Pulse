@@ -1,6 +1,10 @@
 import Foundation
+#if canImport(Network)
 import Network
-import os
+#endif
+#if canImport(os)
+import os       // unused today; kept so a Darwin-only
+#endif          // logger can be added without a platform check
 
 enum NetworkProxyMode: String, CaseIterable, Codable, Identifiable, Sendable {
     case system
@@ -135,9 +139,10 @@ enum NetworkSession {
         _ configuration: URLSessionConfiguration,
         for settings: NetworkProxySettings
     ) -> URLSessionConfiguration {
-        guard let endpoint = settings.endpoint,
-              let port = NWEndpoint.Port(rawValue: endpoint.port)
-        else { return configuration }
+        guard let endpoint = settings.endpoint else { return configuration }
+
+        #if canImport(Network)
+        guard let port = NWEndpoint.Port(rawValue: endpoint.port) else { return configuration }
 
         let target = NWEndpoint.hostPort(host: NWEndpoint.Host(endpoint.host), port: port)
         switch settings.kind {
@@ -146,6 +151,40 @@ enum NetworkSession {
         case .socks5:
             configuration.proxyConfigurations = [ProxyConfiguration(socksv5Proxy: target)]
         }
+        #else
+        // Foundation on Linux has no `ProxyConfiguration` and no
+        // `proxyConfigurations` — verified by compiling both, not assumed. The
+        // older dictionary form is what swift-corelibs-foundation's libcurl
+        // backend reads, so the same settings are expressed as
+        // `connectionProxyDictionary` here.
+        //
+        // The keys are the CFNetwork spellings written out as strings rather
+        // than as the `kCFNetworkProxies*` constants: those constants are not
+        // declared on Linux, and the backend parses the strings.
+        //
+        // `HTTPEnable` is set alongside the HTTPS pair because libcurl will
+        // not proxy a plain-HTTP request from an HTTPS-only dictionary, and a
+        // provider endpoint reached over http:// would then silently bypass
+        // the proxy the user asked for — a quieter failure than a refused
+        // connection.
+        switch settings.kind {
+        case .http:
+            configuration.connectionProxyDictionary = [
+                "HTTPEnable": 1,
+                "HTTPProxy": endpoint.host,
+                "HTTPPort": Int(endpoint.port),
+                "HTTPSEnable": 1,
+                "HTTPSProxy": endpoint.host,
+                "HTTPSPort": Int(endpoint.port),
+            ]
+        case .socks5:
+            configuration.connectionProxyDictionary = [
+                "SOCKSEnable": 1,
+                "SOCKSProxy": endpoint.host,
+                "SOCKSPort": Int(endpoint.port),
+            ]
+        }
+        #endif
         return configuration
     }
 }

@@ -1,6 +1,14 @@
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+// swift-crypto, Apple's cross-platform implementation of the same API.
+// See Package.swift for why Linux needs it.
+import Crypto
+#endif
 import Foundation
-import IOKit
+#if canImport(IOKit)
+import IOKit      // unused here; the machine identifier lives in LocalSecrets
+#endif
 
 /// Where a key typed into Settings is kept: encrypted, in Pulse's own folder.
 ///

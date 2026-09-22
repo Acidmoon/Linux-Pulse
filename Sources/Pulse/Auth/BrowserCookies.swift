@@ -1,7 +1,17 @@
+#if canImport(AppKit)
 import AppKit
+#endif
+#if canImport(CommonCrypto)
 import CommonCrypto
+#endif
 import Foundation
+#if canImport(SQLite3)
 import SQLite3
+#else
+// The Linux toolchain ships no modulemap for SQLite; Sources/CSQLite
+// supplies one. See Package.swift.
+import CSQLite
+#endif
 
 /// Reading one site's session cookie out of the browser the user signed in
 /// with, so they don't have to copy it from developer tools by hand.
@@ -137,7 +147,14 @@ enum BrowserCookies {
     ///
     /// Asked of LaunchServices rather than guessed from what is installed:
     /// having Chrome on disk says nothing about whether it is ever used.
+    ///
+    /// Nil on Linux, which is not the same answer as "no browser": nothing on
+    /// this platform is equivalent to the LaunchServices default-app query,
+    /// and guessing from what is installed is exactly the mistake the note
+    /// above rejects. Callers that need a browser session either take the one
+    /// the user names in Settings or fall back to trying each store.
     static func preferred() -> Browser? {
+        #if canImport(AppKit)
         guard
             let https = URL(string: "https://example.com"),
             let application = NSWorkspace.shared.urlForApplication(toOpen: https),
@@ -154,6 +171,9 @@ enum BrowserCookies {
         case "company.thebrowser.Browser": .arc
         default: nil
         }
+        #else
+        return nil
+        #endif
     }
 
     // MARK: - Where each browser keeps them
@@ -274,6 +294,23 @@ enum BrowserCookies {
     /// under "Microsoft Edge Safe Storage", and building the name from the
     /// display name found nothing, failed silently, and fell through to the
     /// next browser.
+    ///
+    /// **Not yet implemented on Linux, and returning nil is the honest answer
+    /// rather than a placeholder.** The key is not in a keychain there: Chrome
+    /// asks the Secret Service (gnome-keyring or KWallet) for an entry named
+    /// "Chrome Safe Storage", which is a different lookup rather than a
+    /// different spelling of this one. And the decryption below is
+    /// AES-128-CBC, which swift-crypto does not expose, so it needs libcrypto
+    /// or a hand-rolled CBC before the rest of this path can work at all.
+    ///
+    /// The cost of the gap is bounded and known: it covers the providers read
+    /// from a browser session — Ollama Cloud, Xiaomi Coding Plan, Cursor, Grok
+    /// Bot, and Devin's web-storage route — and none of those are in the
+    /// phase-1 acceptance set. They sit in the roadmap's phase 3, which is
+    /// where this needs measuring against a real browser rather than reasoning
+    /// about. **So a Linux build reports those providers as unavailable
+    /// instead of reporting a number.**
+    #if canImport(CommonCrypto)
     static func safeStorageKey(service: String) -> Data? {
         var request: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -353,6 +390,17 @@ enum BrowserCookies {
         guard out.count > 32, let text = String(data: out.dropFirst(32), encoding: .utf8) else { return nil }
         return text
     }
+    #else
+    /// Nil means "no session is available on this platform".
+    ///
+    /// Callers already treat a missing key as an unavailable provider — that
+    /// is what an unpermitted keychain reads as on macOS — so this reports the
+    /// same way on Linux rather than inventing an error the UI has no wording
+    /// for. See the note above for what is actually missing.
+    static func safeStorageKey(service: String) -> Data? { nil }
+
+    static func decrypt(_ encrypted: Data, with key: Data) -> String? { nil }
+    #endif
 
     // MARK: - Safari: a binary file, behind Full Disk Access
 

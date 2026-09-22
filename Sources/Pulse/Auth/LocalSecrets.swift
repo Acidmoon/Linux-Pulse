@@ -1,6 +1,14 @@
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+// swift-crypto, Apple's cross-platform implementation of the same API.
+// See Package.swift for why Linux needs it.
+import Crypto
+#endif
 import Foundation
+#if canImport(IOKit)
 import IOKit
+#endif
 
 /// Encrypting something small enough to keep in Pulse's own folder.
 ///
@@ -38,6 +46,7 @@ enum LocalSecrets {
         return SymmetricKey(data: SHA256.hash(data: material))
     }
 
+    #if canImport(IOKit)
     private static func hardwareIdentifier() -> String? {
         let service = IOServiceGetMatchingService(
             kIOMainPortDefault,
@@ -54,6 +63,32 @@ enum LocalSecrets {
         )
         return property?.takeRetainedValue() as? String
     }
+    #else
+    /// The machine's own identifier, read from the first of these that has one.
+    ///
+    /// `/etc/machine-id` is the systemd-era answer and is what a Linux
+    /// install almost always has; `/var/lib/dbus/machine-id` is the same value
+    /// under its older name, kept as a fallback for a system with no systemd.
+    ///
+    /// **This is a weaker input than the IOKit UUID, and the difference is
+    /// worth stating.** `IOPlatformUUID` is readable only by an administrator;
+    /// `/etc/machine-id` is world-readable, so on a machine with other local
+    /// users the key material is not a secret from them. What still holds is
+    /// the property the file depends on: the value is unique to this machine,
+    /// so a copy of `keys.dat` carried to another machine — in a backup, a
+    /// synced folder — opens nowhere. The 0600 permission on the file is
+    /// therefore doing more of the work here than it does on macOS, and is not
+    /// optional. See `write(_:to:)` below, which re-applies it after every
+    /// write because an atomic write replaces rather than truncates.
+    private static func hardwareIdentifier() -> String? {
+        for path in ["/etc/machine-id", "/var/lib/dbus/machine-id"] {
+            guard let contents = try? String(contentsOfFile: path, encoding: .utf8) else { continue }
+            let trimmed = contents.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        return nil
+    }
+    #endif
 
     /// Writes a file only this user can read, and keeps it that way.
     ///

@@ -1,6 +1,18 @@
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+// swift-crypto, Apple's cross-platform implementation of the same API.
+// See Package.swift for why Linux needs it.
+import Crypto
+#endif
 import Foundation
+#if canImport(SQLite3)
 import SQLite3
+#else
+// The Linux toolchain ships no modulemap for SQLite; Sources/CSQLite
+// supplies one. See Package.swift.
+import CSQLite
+#endif
 
 /// Devin's daily and weekly quota, read from the cache its own desktop app
 /// keeps.

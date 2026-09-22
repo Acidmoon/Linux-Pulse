@@ -1,6 +1,8 @@
 import Foundation
 import Observation
+#if canImport(SwiftUI)
 import SwiftUI
+#endif
 
 /// User-facing preferences, persisted in `UserDefaults`.
 @Observable
@@ -1046,6 +1048,11 @@ final class AppSettings {
     }
 
     /// The colour chosen for an account's mark, or nil for its brand colour.
+    ///
+    /// Excluded from Linux with the rest of the colour handling: `RingTint`
+    /// lives in the AppKit-drawn panel, and the stored hex is what actually
+    /// persists — the getter is only how the settings picker reads it back.
+    #if canImport(SwiftUI)
     func botColour(for account: AccountKey) -> Color? {
         RingTint.color(from: botColours[account.id])
     }
@@ -1065,6 +1072,7 @@ final class AppSettings {
         updated[account.id] = hex
         botColours = updated
     }
+    #endif
 
     /// The shape an account's mark wears. A stored value that no longer
     /// names a shape reads as round rather than as a blank ring.
@@ -1080,6 +1088,7 @@ final class AppSettings {
     }
 
     /// The colour chosen for an account's ring, or nil to colour it by usage.
+    #if canImport(SwiftUI)
     func ringTint(for account: AccountKey) -> Color? {
         RingTint.color(from: ringTints[account.id])
     }
@@ -1102,6 +1111,7 @@ final class AppSettings {
         updated[account.id] = hex
         ringTints = updated
     }
+    #endif
 
     /// The browser an account's session is read from, or nil for "whichever".
     func sessionBrowser(for account: AccountKey) -> BrowserCookies.Browser? {

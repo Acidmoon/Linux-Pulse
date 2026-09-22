@@ -1,4 +1,10 @@
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+// swift-crypto, Apple's cross-platform implementation of the same API.
+// See Package.swift for why Linux needs it.
+import Crypto
+#endif
 import Foundation
 
 /// One agent's ledger, kept between launches.

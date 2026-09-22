@@ -1,5 +1,11 @@
 import Foundation
+#if canImport(SQLite3)
 import SQLite3
+#else
+// The Linux toolchain ships no modulemap for SQLite; Sources/CSQLite
+// supplies one. See Package.swift.
+import CSQLite
+#endif
 
 /// Read-only SQLite access for the agents that keep their records in a
 /// database.

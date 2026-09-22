@@ -1,7 +1,20 @@
+#if canImport(AppKit)
 import AppKit
+#endif
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+// swift-crypto, Apple's cross-platform implementation of the same API.
+// See Package.swift for why Linux needs it.
+import Crypto
+#endif
 import Foundation
+#if canImport(Network)
 import Network
+#endif
+#if canImport(Glibc)
+import Glibc
+#endif
 
 /// Signing Pulse in to one account of a provider, so it can watch more than
 /// one subscription at a time.
@@ -551,7 +564,7 @@ enum OAuthLogin {
             throw Failure.unsupported
         }
 
-        _ = await MainActor.run { NSWorkspace.shared.open(url) }
+        _ = await MainActor.run { PlatformOpen.url(url) }
 
         let code = try await listener.awaitCode(giveUpAfter: Self.patience)
         return try await exchange(code, configuration: configuration, verifier: verifier, redirect: redirect, state: state)

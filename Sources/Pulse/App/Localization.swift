@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(SwiftUI)
 import SwiftUI
+#endif
 
 /// The interface language: whatever the system is set to, or one the user has
 /// picked explicitly.
@@ -160,11 +162,37 @@ extension String {
     /// live in `Bundle.module`, so implicit lookups silently fall through to
     /// the key itself and the app stays in English no matter the system
     /// language or the user's choice.
+    #if canImport(Darwin)
     static func localized(_ key: String.LocalizationValue) -> String {
         String(localized: key, bundle: LocalizationSource.bundle)
     }
+    #else
+    /// Looks a key up through the older `Bundle` API, because Linux's
+    /// Foundation has neither `String.LocalizationValue` nor
+    /// `String(localized:bundle:)` — both were verified by compiling them
+    /// rather than assumed. Everything around them does work: `Bundle.module`,
+    /// `localizations`, `path(forResource:ofType:"lproj")`, and every
+    /// `Locale.Language` accessor `myriadUnits` uses.
+    ///
+    /// **A key that interpolates is looked up as its already-interpolated
+    /// text.** `LocalizationValue` is the thing that carries a key and its
+    /// arguments separately; without it the call has collapsed to one `String`
+    /// before this runs, so no entry in the strings file can match and the
+    /// text prints as written. Non-interpolated keys — the large majority, and
+    /// every string in the `.lproj` tables — resolve normally, through the
+    /// same `LocalizationSource.bundle` the Darwin path uses, so a language
+    /// chosen in settings still takes effect immediately.
+    ///
+    /// Closing that gap is roadmap phase 3; it needs a format-string scheme of
+    /// Pulse's own or a move to gettext, and it is a change to how every
+    /// translated string is authored, not a portability shim.
+    static func localized(_ key: String) -> String {
+        LocalizationSource.bundle.localizedString(forKey: key, value: key, table: nil)
+    }
+    #endif
 }
 
+#if canImport(SwiftUI)
 extension Text {
     /// `Text` that resolves its key in the app's current language. See
     /// `String.localized(_:)` for why the implicit form can't be used.
@@ -172,3 +200,4 @@ extension Text {
         self.init(String.localized(key))
     }
 }
+#endif

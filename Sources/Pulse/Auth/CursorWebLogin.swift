@@ -1,5 +1,13 @@
+#if canImport(AppKit)
 import AppKit
+#endif
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+// swift-crypto, Apple's cross-platform implementation of the same API.
+// See Package.swift for why Linux needs it.
+import Crypto
+#endif
 import Foundation
 
 /// Signing Pulse in to a second Cursor account, which is what a second Grok
@@ -71,7 +79,7 @@ enum CursorWebLogin {
     static func signIn() async throws -> AccountCredentials {
         guard let attempt = start() else { throw OAuthLogin.Failure.unsupported }
 
-        _ = await MainActor.run { NSWorkspace.shared.open(attempt.loginURL) }
+        _ = await MainActor.run { PlatformOpen.url(attempt.loginURL) }
 
         let deadline = Date().addingTimeInterval(patience)
         while Date() < deadline {

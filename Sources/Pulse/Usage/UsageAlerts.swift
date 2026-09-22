@@ -1,6 +1,8 @@
 import Foundation
 import Observation
+#if canImport(UserNotifications)
 import UserNotifications
+#endif
 
 /// How full a limit has to get before Pulse says something unprompted.
 ///
@@ -471,12 +473,21 @@ final class UsageAlerts {
     /// What the system says, rather than what was asked for. A grant can be
     /// withdrawn in System Settings long after it was given, and a switch that
     /// is on while macOS is dropping everything Pulse posts is a lie.
+    #if canImport(UserNotifications)
     private(set) var authorization: UNAuthorizationStatus = .notDetermined
+    #else
+    /// Linux has no `UNAuthorizationStatus` and no system notification centre
+    /// to ask, so there is no grant to report. `isSupported` is what the
+    /// settings pane reads instead, and there it says so in words.
+    private(set) var authorizationGranted = false
+    #endif
 
     private let settings: AppSettings
     // Read-only outside this type so tests can verify no warning is consumed during authorization.
     private(set) var memory: AlertMemory
+    #if canImport(UserNotifications)
     private var tapHandler: NotificationTapHandler?
+    #endif
     private var authorizationRequest: Task<Bool, Never>?
     private let memoryFile: URL
 
@@ -498,11 +509,13 @@ final class UsageAlerts {
     func start(openSettings: @escaping @MainActor () -> Void) {
         guard Self.isSupported else { return }
 
+        #if canImport(UserNotifications)
         let handler = NotificationTapHandler(open: openSettings)
         tapHandler = handler
         UNUserNotificationCenter.current().delegate = handler
 
         Task { await readAuthorization() }
+        #endif
     }
 
     /// Re-reads the grant. Called when the settings window opens, because that
@@ -514,7 +527,9 @@ final class UsageAlerts {
     /// which is verbatim the failure the property exists to report.
     func refreshAuthorization() {
         guard Self.isSupported else { return }
+        #if canImport(UserNotifications)
         Task { await readAuthorization() }
+        #endif
     }
 
     /// Asks, if anything is switched on and nobody has been asked yet. Called
@@ -522,12 +537,16 @@ final class UsageAlerts {
     /// place the dialog is expected.
     func requestAuthorizationIfNeeded() async -> Bool {
         guard Self.isSupported else { return false }
+        #if !canImport(UserNotifications)
+        return false
+        #else
         return await requestAuthorizationIfNeeded {
             let granted = (try? await UNUserNotificationCenter.current()
                 .requestAuthorization(options: [.alert, .sound])) ?? false
             await self.readAuthorization()
             return granted
         }
+        #endif
     }
 
     /// Injectable authorization operation: tests never contact the system centre.
@@ -602,6 +621,7 @@ final class UsageAlerts {
     }
 
     private func post(_ alert: UsageAlert) {
+        #if canImport(UserNotifications)
         let content = UNMutableNotificationContent()
         content.title = settings.label(for: alert.account)
         if let subtitle = subtitle(for: alert) { content.subtitle = subtitle }
@@ -615,6 +635,13 @@ final class UsageAlerts {
             trigger: nil
         )
         Task { try? await UNUserNotificationCenter.current().add(request) }
+        #else
+        // Reached only if something calls `post` without checking
+        // `isSupported`, which is false here. Deliberately silent rather than
+        // fatal: a notification is the least important thing Pulse does, and
+        // losing one must never be the reason a refresh stops.
+        _ = alert
+        #endif
     }
 
     /// The limit's own name, which is the second thing you need after knowing
@@ -684,9 +711,11 @@ final class UsageAlerts {
     }
 
     private func readAuthorization() async {
+        #if canImport(UserNotifications)
         authorization = await UNUserNotificationCenter.current()
             .notificationSettings()
             .authorizationStatus
+        #endif
     }
 
     /// One serial queue, so two saves cannot land out of order and neither
@@ -722,6 +751,7 @@ final class UsageAlerts {
 /// than the account's own: the pane is the view's own state, and reaching into
 /// it from here would mean threading a selection through the window controller
 /// for a feature that is one click away as it is.
+#if canImport(UserNotifications)
 final class NotificationTapHandler: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
     private let open: @MainActor () -> Void
 
@@ -755,7 +785,7 @@ final class NotificationTapHandler: NSObject, UNUserNotificationCenterDelegate, 
         }
     }
 }
-
+#endif
 
 /// Carries a completion handler across to the main actor.
 ///

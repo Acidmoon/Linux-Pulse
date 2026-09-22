@@ -1,4 +1,6 @@
+#if canImport(AppKit)
 import AppKit
+#endif
 import Foundation
 
 /// Pulse's side of Claude Code's status line.
@@ -266,6 +268,12 @@ enum StatusLineHook {
         defaults.set(true, forKey: Key.offered)
         guard !isInstalled else { return }
 
+        // The consent question is a dialog, so it is part of the macOS UI and
+        // not built on Linux. What matters for the port is that the decision
+        // is still recorded above and that `install()` is still reachable:
+        // connecting the status line is a settings action, and Claude Code's
+        // status line works identically on Linux.
+        #if canImport(AppKit)
         let alert = NSAlert()
         alert.messageText = .localized("Keep reading Claude Code's usage after its login expires?")
         alert.informativeText = .localized("Claude Code saves a login that lasts a few hours, and only Claude Code can renew it. It also reports your limits to whatever status line command is registered — Pulse can be that command, and then it keeps working whether the login is fresh or not.\n\nThis edits ~/.claude/settings.json and changes the status line at the bottom of your Claude Code sessions. Any status line you already have keeps working, and you can disconnect it in Settings.")
@@ -285,6 +293,7 @@ enum StatusLineHook {
             failed.runModal()
             return
         }
+        #endif
     }
 
     private enum Key {

@@ -1,5 +1,11 @@
 import Foundation
+#if canImport(SQLite3)
 import SQLite3
+#else
+// The Linux toolchain ships no modulemap for SQLite; Sources/CSQLite
+// supplies one. See Package.swift.
+import CSQLite
+#endif
 
 /// OpenCode's store, and Kilo CLI's — the same schema, because Kilo is a fork
 /// of it down to the migrations.

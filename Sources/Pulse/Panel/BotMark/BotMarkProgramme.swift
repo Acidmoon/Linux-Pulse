@@ -1,3 +1,10 @@
+// The macOS UI. Excluded from the Linux build rather than ported: this file
+// is SwiftUI/AppKit presentation, and the Linux panel is drawn by a separate
+// GTK4 process (see Docs/linux/migration-assessment.md). The guard is the
+// module the file actually imports, so a file that only needs SwiftUI is not
+// asking for AppKit.
+// pulse-linux: excluded
+#if canImport(SwiftUI)
 import SwiftUI
 
 /// What a mark should be playing, and how.
@@ -146,3 +153,4 @@ enum BotMarkEvent: Equatable, Sendable {
         }
     }
 }
+#endif
