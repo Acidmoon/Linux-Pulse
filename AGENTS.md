@@ -70,5 +70,30 @@
 ## 环境备忘（Deepin 25 / x86_64）
 - OS：Deepin 25（`crimson`，Debian 系），glibc **2.38**
 - 当前会话：**X11**（`XDG_SESSION_TYPE=x11`，`DISPLAY=:0`）；Wayland 需另测
-- Swift 官方 Ubuntu 24.04 工具链要求 glibc ≥ 2.39，本机不满足；可选 Ubuntu 22.04 build（要求 glibc ≥ 2.35）或 Static Linux SDK
-- `gh` 已登录 `Acidmoon`（scopes: repo, gist, read:org）
+- `gh` 已登录 `Acidmoon`（scopes: repo, gist, read:org），`gh auth setup-git` 已配置为 git credential helper
+- 硬件：4 核 / 15 GB RAM / `/home` 余量 ~104 GB
+
+### Swift 工具链（已装并验证）
+```
+版本   : Swift 6.4 (swift-6.4-RELEASE), target x86_64-unknown-linux-gnu
+发行包 : swift-6.4.0-RELEASE-ubuntu22.04.tar.gz  （Ubuntu 22.04 build）
+路径   : ~/.local/share/swift/tc/swift-6.4.0-RELEASE-ubuntu22.04
+PATH   : 已写入 ~/.bashrc 的 "Swift 6.4 toolchain" 段（新交互 shell 生效）
+```
+选 Ubuntu 22.04 build 而非 24.04：24.04 build 要求 glibc ≥ 2.39，本机 2.38 不满足；22.04 build 要求 ≥ 2.35，实测可用。（Swift 官方 6.4 亦提供 Ubuntu 26.04 build 与 Static SDK。）
+
+实测结论（`swiftc -typecheck` / 冒烟程序，2026-09-22）：
+
+| 模块 | Linux 可用性 | 备注 |
+|---|---|---|
+| Foundation, FoundationNetworking | ✅ | `URLSession` 需显式 `import FoundationNetworking` |
+| Observation | ✅ | 6 个文件在用 |
+| swift-testing (`import Testing`) | ✅ | 工具链自带，70 个测试文件用 |
+| SQLite3 | ⚠️ | 工具链**不带** `SQLite3` modulemap，且 `/usr/include/sqlite3.h` 缺失（未装 `libsqlite3-dev`） |
+| CryptoKit / CommonCrypto | ❌ | 需改用 swift-crypto 提供的 `Crypto` 模块 |
+| AppKit / SwiftUI / Carbon / CoreGraphics / IOKit / Security / ServiceManagement / Sparkle / Network / os / UserNotifications / Darwin | ❌ | 全部需要替代方案或重写 |
+
+### 已知的构建前置缺口
+- `libsqlite3-dev`（`/usr/include/sqlite3.h`）缺失，且本机 `sudo` 需要密码 → **需要用户执行**：
+  `sudo apt install libsqlite3-dev`（另有 `libcurl4-openssl-dev`、`libxml2-dev`、`libedit-dev`、`clang` 视情况）
+- 全库**当前零条件编译**（`Sources/` + `Tests/` 中 `#if canImport` / `#if os(` 出现 0 次），即现状完全无法在 Linux 编译
