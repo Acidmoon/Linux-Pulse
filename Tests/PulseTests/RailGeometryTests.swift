@@ -1,10 +1,15 @@
-// The macOS UI. Excluded from the Linux build with the code it tests —
-// `DockLayout` and the rail's shapes are SwiftUI geometry. See
-// Docs/linux/migration-assessment.md.
-// pulse-linux: excluded
-#if canImport(AppKit)
+// Upstream's own tests. Enabled on Linux along with the code they test.
+//
+// One substitution: `shownSlotCount` is `PanelLayout.shownSlotCount` here,
+// because on Linux there is no `FloatingPanelController` to hang it on — the
+// geometry moved to `PanelLayout` and the Mac side keeps a forwarder, so the
+// Mac keeps calling it where it always did. Every number asserted below is
+// upstream's and untouched.
+// pulse-linux: reused
+
 import Foundation
 import Testing
+
 @testable import Pulse
 
 /// Every ring the rail draws has to be reachable.
@@ -169,7 +174,7 @@ struct RailGeometryTests {
 
         #expect(settings.shownAccounts == [antigravity])
         // One account, two rings. `shownAccounts.count` would answer 1.
-        #expect(FloatingPanelController.shownSlotCount(settings, usage: { _ in split }) == 2)
+        #expect(PanelLayout.shownSlotCount(settings, usage: { _ in split }) == 2)
 
         // And the rail the window sizes from is a ring longer for it.
         let short = DockLayout.size(for: 1, on: .vertical, docked: true)
@@ -190,7 +195,7 @@ struct RailGeometryTests {
         )
 
         let loading = ProviderUsage.unavailable(antigravity, reason: .loading)
-        #expect(FloatingPanelController.shownSlotCount(settings, usage: { _ in loading }) == 1)
+        #expect(PanelLayout.shownSlotCount(settings, usage: { _ in loading }) == 1)
     }
 
     @MainActor
@@ -346,4 +351,3 @@ struct RailOffsetTests {
         #expect(offsets.leading <= max(tiny.width - rail.width, 0))
     }
 }
-#endif

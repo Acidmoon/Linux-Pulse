@@ -10,67 +10,6 @@ import SwiftUI
 
 @MainActor
 final class FloatingPanelController {
-    /// The panel's frame, derived from the SwiftUI layer's own layout
-    /// constants (`DockLayout` in UsageDockView.swift, `DetailCardLayout` in
-    /// UsageDetailCard.swift) so it can never drift out of sync with what
-    /// SwiftUI actually draws. Not `private` because
-    /// `FloatingUsagePanelView`'s `#Preview` sizes itself from these too.
-    ///
-    /// **The panel is this size always — it does not grow when the details
-    /// card opens.** It used to, and that was the source of a stubborn
-    /// glitch: widening the panel moves its left edge, which moves the
-    /// coordinate space the SwiftUI content is laid out in. The dock rail's
-    /// position *within that space* therefore jumps by the width of the card,
-    /// even though its position on screen never changes — and since this all
-    /// happens inside the animation that opens the card, SwiftUI dutifully
-    /// animates the jump, flinging the rail sideways and sliding it back.
-    /// A panel that never resizes cannot do that. The extra width costs
-    /// nothing: it is transparent, and macOS routes clicks through the
-    /// transparent parts of a non-opaque window.
-    enum Layout {
-        /// The panel's size for a given dock and display housing. It changes
-        /// when the axis or screen geometry changes, never while a card opens
-        /// or the notch surface expands. That distinction is
-        /// the whole point: growing the window mid-animation moves the
-        /// coordinate space the rail is laid out in, so the rail lurches
-        /// sideways and slides back every time a card appears. Re-docking
-        /// happens under the pointer, with no card open, and has to resize.
-        static func size(for edge: PanelEdge, notchSize: CGSize? = nil) -> CGSize {
-            // Card + its pointer + the gap after it, which is the room the
-            // card unfolds into whichever way it unfolds.
-            let reach = DetailCardLayout.width
-                + DetailCardLayout.pointerWidth
-                + DetailCardLayout.horizontalGap
-
-            switch edge.axis {
-            case .vertical:
-                return CGSize(
-                    width: reach + DockLayout.thickness(on: .vertical),
-                    // Tall enough for whichever is bigger: the rail with every
-                    // provider on, or the tallest card that might be shown
-                    // beside it. A card taller than the window gets sliced off
-                    // flat against its edge, which reads as a drawing bug
-                    // rather than as a card that didn't fit.
-                    height: max(DockLayout.maximumLength(on: .vertical), DetailCardLayout.maximumHeight)
-                )
-            case .horizontal:
-                return CGSize(
-                    // Wide enough for whichever is wider, for the same reason.
-                    width: max(DockLayout.maximumLength(on: .horizontal), DetailCardLayout.width, notchSize?.width ?? 0),
-                    height: DockLayout.thickness(on: .horizontal)
-                        + (notchSize?.height ?? 0)
-                        + DetailCardLayout.horizontalGap
-                        + DetailCardLayout.pointerWidth
-                        + DetailCardLayout.maximumHeight
-                )
-            }
-        }
-
-        /// The vertical dock's size, which is what the previews and anything
-        /// written before there was a second axis mean.
-        static var width: CGFloat { size(for: .right).width }
-        static var height: CGFloat { size(for: .right).height }
-    }
 
     private let panel: FloatingPanel
     private var hostingView: NSHostingView<FloatingUsagePanelView>?
@@ -99,7 +38,7 @@ final class FloatingPanelController {
             "the collapsed sliver escapes the rail's hit area — see PanelHitArea"
         )
 
-        let initialSize = Layout.size(for: placement.edge)
+        let initialSize = PanelLayout.size(for: placement.edge)
         panel = FloatingPanel(
             contentRect: NSRect(
                 x: 0,
@@ -338,15 +277,14 @@ final class FloatingPanelController {
     /// need rather than the controller that owns the panel — and it takes the
     /// readings as a function rather than the store so a test can hand it a
     /// split account without a store to seed.
+    /// Kept as a forwarder so nothing on the Mac side has to move: the
+    /// geometry it uses lives in `PanelLayout` now, because the Linux panel
+    /// asks the same question and has no window controller to ask it of.
     static func shownSlotCount(
         _ settings: AppSettings,
         usage: (AccountKey) -> ProviderUsage
     ) -> Int {
-        RailSlot.rail(
-            for: settings.shownAccounts,
-            isSplit: settings.isSplit,
-            groups: { RailSlot.modelGroups(of: usage($0)) }
-        ).count
+        PanelLayout.shownSlotCount(settings, usage: usage)
     }
 
     /// Parks the panel where it was last left.
@@ -380,7 +318,7 @@ final class FloatingPanelController {
         let layout = placement.layout(
             in: screen.visibleFrame,
             topEdge: FloatingPanel.topEdge(of: screen),
-            panel: Layout.size(for: edge, notchSize: placement.notch?.size),
+            panel: PanelLayout.size(for: edge, notchSize: placement.notch?.size),
             rail: railSize
         )
 
@@ -623,7 +561,7 @@ private final class FloatingPanel: NSPanel {
         }
         let landingRail = railSize?(landing, dock.isDocked) ?? rail
         let landingNotch = dock.edge == .top ? PanelScreen.notch(of: screen) : nil
-        let landingPanel = FloatingPanelController.Layout.size(for: landing, notchSize: landingNotch?.size)
+        let landingPanel = PanelLayout.size(for: landing, notchSize: landingNotch?.size)
 
         // Under the pointer, in the new orientation. Carrying the old grab
         // offset across a quarter turn would put the rail somewhere the hand
