@@ -1,0 +1,131 @@
+name: Linux CI
+
+# The Linux port's build and test gate.
+#
+# `ci.yml` is the macOS gate and is deliberately left alone: nothing here may
+# change what the macOS build does. This workflow exists so that a change made
+# for Linux cannot quietly break Linux without anyone noticing, and so that
+# "it builds on my machine" is replaced with a recorded result.
+#
+# This job is expected to be RED until the core port lands (roadmap phase 1).
+# That is the point — it enumerates what still fails rather than hiding it
+# behind `continue-on-error`. Read the failure list as the current work queue.
+# See Docs/linux/migration-assessment.md.
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+concurrency:
+  group: linux-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned rather than `latest`: the Linux port's assessment was made against
+  # 6.4 and the toolchain's behaviour (which modulemaps exist, whether
+  # FoundationNetworking is needed) is part of what is being tested.
+  SWIFT_VERSION: 6.4.0
+  SWIFT_BUILD_NAME: swift-6.4.0-RELEASE
+
+jobs:
+  build-and-test:
+    # Pinned rather than ubuntu-latest so a runner image rollover cannot
+    # change the glibc the build is measured against.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            binutils \
+            libcurl4-openssl-dev \
+            libedit-dev \
+            libncurses-dev \
+            libpython3-dev \
+            libsqlite3-dev \
+            libxml2-dev \
+            pkg-config \
+            zlib1g-dev
+
+      # The Ubuntu 24.04 build is used here because the runner is 24.04
+      # (glibc 2.39). On a host below that — Debian 12, Deepin 25, Ubuntu
+      # 22.04 — the 22.04 build is the one that works, which is what
+      # Scripts/linux/swift-env.sh picks locally. Both are the same compiler.
+      - name: Install Swift toolchain
+        run: |
+          set -euo pipefail
+          archive="${SWIFT_BUILD_NAME}-ubuntu24.04.tar.gz"
+          url="https://download.swift.org/swift-${SWIFT_VERSION}-release/ubuntu2404/${SWIFT_BUILD_NAME}/${archive}"
+          curl -fsSL -o "/tmp/${archive}" "$url"
+          mkdir -p "$HOME/.local/share/swift"
+          tar -xzf "/tmp/${archive}" -C "$HOME/.local/share/swift"
+          echo "SWIFT_TOOLCHAIN_ROOT=$HOME/.local/share/swift/${SWIFT_BUILD_NAME}-ubuntu24.04" >> "$GITHUB_ENV"
+
+      - name: Swift version
+        run: |
+          source Scripts/linux/swift-env.sh
+          swift --version
+          swift --version | tee /tmp/swift-version.txt
+
+      # `swift build` is the first check, matching the macOS gate's ordering:
+      # compile errors are the useful signal, and a test run that never
+      # compiled says nothing.
+      - name: Build
+        id: build
+        run: |
+          source Scripts/linux/swift-env.sh
+          swift build 2>&1 | tee /tmp/build.log
+
+      - name: Test
+        if: always()
+        id: test
+        run: |
+          source Scripts/linux/swift-env.sh
+          swift test 2>&1 | tee /tmp/test.log
+
+      # A failure here is the normal state until phase 1 completes, so the
+      # summary says what is failing rather than leaving a bare red X.
+      - name: Summarize
+        if: always()
+        run: |
+          {
+            echo "### Linux CI"
+            echo
+            echo '```'
+            cat /tmp/swift-version.txt 2>/dev/null || echo "(toolchain not installed)"
+            echo '```'
+            echo
+            if [ "${{ steps.build.outcome }}" = "success" ]; then
+              echo "- build: **pass**"
+            else
+              echo "- build: **fail** — first errors below"
+              echo
+              echo '```'
+              grep -E 'error:' /tmp/build.log 2>/dev/null | head -40 || echo "(no build log)"
+              echo '```'
+              echo
+              echo "Total errors: $(grep -cE 'error:' /tmp/build.log 2>/dev/null || echo 0)"
+              echo
+              echo "Expected red until roadmap phase 1 lands — see \`Docs/linux/migration-assessment.md\`."
+            fi
+            echo
+            echo "- test: **${{ steps.test.outcome }}**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-ci-logs
+          path: |
+            /tmp/build.log
+            /tmp/test.log
+          if-no-files-found: ignore
+          retention-days: 14
