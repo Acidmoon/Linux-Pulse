@@ -373,7 +373,8 @@ package final class PanelModel {
         // not something a test can see, and a rail below the bottom of a
         // shortened window looks like a panel that failed to draw rather than
         // like arithmetic that used the wrong frame.
-        if ProcessInfo.processInfo.environment["PULSE_PANEL_DEBUG"] != nil {
+        if ProcessInfo.processInfo.environment["PULSE_PANEL_DEBUG"] != nil,
+           settleReported < 1 {
             let fits = railOrigin.y + railSize.height <= size.height
             let line = "Pulse panel: window \(Int(size.width))x\(Int(size.height)) at "
                 + "(\(Int(origin.x)), \(Int(origin.y))), asked for "
@@ -382,8 +383,19 @@ package final class PanelModel {
                 + "(\(Int(railOrigin.x)), \(Int(railOrigin.y))) - "
                 + (fits ? "inside the window" : "**outside the window**")
             FileHandle.standardError.write(Data((line + "\n").utf8))
+            // Reported once. The frame is confirmed on several draws while the
+            // window manager settles, and only the last one is the answer.
+            settleReported += 1
         }
     }
+
+    /// How many times the geometry has been reported. For the debug line, which
+    /// is about the settled frame rather than the four before it.
+    package var settleReported = 0
+
+    /// Called when the frame changes again, so the debug line describes the
+    /// position the window finally took rather than an intermediate one.
+    package func resetSettleReport() { settleReported = 0 }
 
     /// How far open the rail is, 0 to 1. Read by the renderer.
     package var railOpenness: Double { openness.value }
@@ -395,6 +407,40 @@ package final class PanelModel {
         // 0.32-second spring: nothing for the first third, then most of it.
         let delayed = (progress - 0.3) / 0.7
         return min(max(delayed, 0), 1)
+    }
+
+    /// The monitor the rail is on, by index.
+    package private(set) var monitorIndex: Int = 0
+
+    /// Moves the rail to the display the pointer is on, if it has moved.
+    ///
+    /// Upstream's rule, and upstream's reason for it: **the pointer is the whole
+    /// definition of "active"** — not the key window, not the frontmost app's
+    /// frame, because an app can be focused on one display while the person is
+    /// working on another.
+    ///
+    /// Returns the geometry to apply, or nil when there is nothing to do: the
+    /// pointer has not changed display, no display can be named, or the panel is
+    /// under the hand — moving it then would put it somewhere the pointer is not
+    /// and the next sample would move it back, which reads as a flicker.
+    ///
+    /// **Not verifiable on this machine**, which has one display. What is
+    /// checked here is that a single-display system never moves the panel.
+    package func followPointer(pointerOnScreen pointer: CGPoint,
+                               monitors: [(index: Int, rect: CGRect)]) -> PanelGeometry? {
+        guard !monitors.isEmpty else { return nil }
+        guard let target = monitors.first(where: { $0.rect.contains(pointer) }) else { return nil }
+        guard target.index != monitorIndex else { return nil }
+        // The rail's own rectangle, in screen coordinates — or the sliver's
+        // target, which is what the pointer is actually on.
+        let railOnScreen = CGRect(x: monitorRect.minX + railOrigin.x,
+                                  y: monitorRect.minY + railOrigin.y,
+                                  width: railSize.width, height: railSize.height)
+        guard !railOnScreen.insetBy(dx: -PanelHitArea.slack, dy: -PanelHitArea.slack)
+            .contains(pointer) else { return nil }
+
+        monitorIndex = target.index
+        return geometry(forScreen: target.rect)
     }
 
     /// The pointer moved, in the panel's own top-left space. Nil when it left.

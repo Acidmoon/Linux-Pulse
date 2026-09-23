@@ -47,10 +47,16 @@ final class Panel {
     private var window: UnsafeMutablePointer<GtkWidget>?
     private var area: UnsafeMutablePointer<GtkWidget>?
     private var timer: UInt32 = 0
-    /// Whether the window's real frame has been read back yet. It cannot be read
-    /// until the window manager has finished with the move, so it waits for the
-    /// first draw.
-    private var confirmedFrame = false
+    /// The last frame read back, and how many times it has been read.
+    ///
+    /// **Confirmed until it stops changing, not once.** The window manager
+    /// honours a move asynchronously, so the first read-back can describe the
+    /// position the window had *before* the move — measured: one run in three
+    /// reported the panel centred at (789, 0) while the next two reported
+    /// (1578, 0), and with a single confirmation the first one kept it. Two
+    /// identical reads in a row is the signal that the frame has settled.
+    private var confirmedFrame = CGRect.zero
+    private var confirmAttempts = 0
 
     /// The animation rate. 30fps, which is what upstream's SwiftUI view chose:
     /// everything the mark plays is slow, and seven engines redrawing at the
@@ -205,8 +211,20 @@ final class Panel {
                                width: Double(monitor.width), height: Double(monitor.height)))
     }
 
+    private var lastDisplaySample = Date()
+
     /// One step of the animation.
     func tick() {
+        // **Which display the panel is on, sampled rather than listened for.**
+        // Upstream's rule and its reason: the pointer is the whole definition of
+        // "active", and a pointer that crosses onto another display and comes to
+        // rest there emits nothing further to notice. A quarter of a second is
+        // slow enough to cost nothing and fast enough that the rail has arrived
+        // by the time the hand has.
+        if Date().timeIntervalSince(lastDisplaySample) > 0.25 {
+            lastDisplaySample = Date()
+            followPointer()
+        }
         guard let area else { return }
         let now = Date()
         model.advance(to: now)
@@ -292,6 +310,35 @@ final class Panel {
         }
     }
 
+    /// Moves the panel to the display the pointer is on, if it has moved.
+    ///
+    /// **X11 only.** A Wayland client cannot ask where the pointer is outside
+    /// its own surfaces — that is the protocol, not a missing binding — so
+    /// `pulse_x11_pointer_position` answers 0 there and nothing happens. The
+    /// panel stays on whichever display it was put on.
+    private func followPointer() {
+        var x: Int32 = 0, y: Int32 = 0
+        guard pulse_x11_pointer_position(&x, &y) == 1, let window else { return }
+
+        let count = pulse_monitor_count()
+        guard count > 1 else { return }
+        var monitors: [(index: Int, rect: CGRect)] = []
+        for index in 0..<Int(count) {
+            let monitor = pulse_monitor_at(Int32(index))
+            guard monitor.valid == 1 else { continue }
+            monitors.append((index, CGRect(x: Double(monitor.x), y: Double(monitor.y),
+                                           width: Double(monitor.width),
+                                           height: Double(monitor.height))))
+        }
+        guard let geometry = model.followPointer(pointerOnScreen: CGPoint(x: Double(x), y: Double(y)),
+                                                 monitors: monitors) else { return }
+        pulse_x11_move(window, Int32(geometry.windowOrigin.x), Int32(geometry.windowOrigin.y))
+        // The frame is a request again, so the offsets are re-derived on the
+        // next draws rather than from this.
+        confirmAttempts = 0
+        confirmedFrame = .zero
+    }
+
     private func pointerMoved(to point: CGPoint?) {
         model.setPointer(point)
     }
@@ -317,13 +364,20 @@ final class Panel {
         // manager has finished, and the rail's offsets are then measured against
         // the frame it really got — which is the whole point of
         // `PanelModel.confirmWindow`.
-        if !confirmedFrame, let window {
+        if confirmAttempts < 40, let window {
             var x: Int32 = 0, y: Int32 = 0, frameWidth: Int32 = 0, frameHeight: Int32 = 0
             if pulse_x11_window_geometry(window, &x, &y, &frameWidth, &frameHeight) == 1 {
-                confirmedFrame = true
-                model.confirmWindow(origin: CGPoint(x: Double(x), y: Double(y)),
-                                    size: CGSize(width: Double(frameWidth),
-                                                 height: Double(frameHeight)))
+                let frame = CGRect(x: Double(x), y: Double(y),
+                                   width: Double(frameWidth), height: Double(frameHeight))
+                confirmAttempts += 1
+                if frame == confirmedFrame {
+                    // Settled. Stop asking, and stop redrawing because of it.
+                    confirmAttempts = 40
+                } else {
+                    confirmedFrame = frame
+                    model.confirmWindow(origin: frame.origin, size: frame.size)
+                    model.resetSettleReport()
+                }
             }
         }
 

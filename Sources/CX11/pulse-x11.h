@@ -45,7 +45,21 @@ static inline void pulse_x11_set_above(GtkWidget* window, int on) { (void)window
 static inline void pulse_x11_set_skip_taskbar(GtkWidget* window, int on) { (void)window; (void)on; }
 static inline void pulse_x11_set_dock_type(GtkWidget* window, int on) { (void)window; (void)on; }
 static inline void pulse_x11_set_all_desktops(GtkWidget* window) { (void)window; }
+/* Where the pointer is on the whole screen, which is what "which display is
+ * active" means here — upstream's own definition, and the reason it samples
+ * rather than listening: a pointer that crosses onto another display and comes
+ * to rest there emits nothing further to notice.
+ *
+ * **X11 only, and that is the protocol's doing.** Wayland deliberately has no
+ * global pointer query — a client cannot ask where the pointer is outside its
+ * own surfaces — so on Wayland the panel stays on the display it was put on.
+ * `Docs/linux/windowing.md` says so rather than leaving it as a mystery. */
+
 static inline void pulse_x11_move(GtkWidget* window, int x, int y) { (void)window; (void)x; (void)y; }
+static inline int pulse_x11_pointer_position(int* x, int* y) {
+    (void)x; (void)y;
+    return 0;
+}
 
 #else
 
@@ -182,6 +196,22 @@ static inline void pulse_x11_set_all_desktops(GtkWidget* window) {
  * `gtk_window_set_default_size` and friends go through the window manager,
  * which may adjust before the first frame. `XMoveWindow` on a mapped window is
  * honoured by a running WM as a client request and has no such negotiation. */
+static inline int pulse_x11_pointer_position(int* x, int* y) {
+    Display* display = pulse_x11_display();
+    if (display == NULL) return 0;
+    Window root = DefaultRootWindow(display);
+    Window returnedRoot = 0, child = 0;
+    int rootX = 0, rootY = 0, windowX = 0, windowY = 0;
+    unsigned int mask = 0;
+    if (!XQueryPointer(display, root, &returnedRoot, &child, &rootX, &rootY,
+                       &windowX, &windowY, &mask)) {
+        return 0;
+    }
+    *x = rootX;
+    *y = rootY;
+    return 1;
+}
+
 static inline void pulse_x11_move(GtkWidget* window, int x, int y) {
     Display* display = pulse_x11_display();
     Window xwindow = pulse_x11_window(window);
