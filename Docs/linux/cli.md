@@ -77,6 +77,59 @@ Cursor / Grok Bot / Devin 读的是别的程序存的登录，Antigravity / Kiro
 
 退出码：0 成功；1 空 key 或写入失败；2 provider 缺失、名字写错、或该 provider 不接受 key。
 
+## `pulse --enable <provider>` / `--disable <provider>`
+
+决定悬浮窗的轨道上显示哪些圆环。
+
+```bash
+pulse --providers              # 列出全部 Provider，● 在轨道上 / ○ 已关闭
+pulse --enable kimiCode        # 打开一个
+pulse --disable cursor         # 关掉一个
+```
+
+名字**大小写不敏感，也接受显示名**——`kimiCode`、`kimicode`、`Kimi Code`
+指的是同一个。原始值是驼峰写法，要求用户记住哪几个字母大写没有道理。
+
+在 Linux 上这不是可有可无的便利：macOS 版靠设置窗口选 Provider，而 Linux
+版没有设置界面，此前唯一的办法是手工编辑 `~/.config/Pulse.plist`。
+对一个本职就是"显示"的程序来说这是个糟糕的答案。
+
+`--enable` 不能用于 Kimi Code 之外的情况——`--set-key` 在存下密钥后会自动
+启用对应的 Provider，所以有密钥可设的 Provider 走那条路即可。Kimi 是例外：
+它借用本机 CLI 已有的登录，没有密钥可设，因此需要一个独立的开关。
+
+退出码：`2` 名字不对或缺失，`1` 开关被拒绝，`0` 成功。
+
+**最后一个圆环关不掉。** 轨道空着不是一个能通过"删掉最后一项"到达的状态，
+`AppSettings.enabledAccounts` 的 `didSet` 会拒绝清空并还原。关掉唯一在轨的
+Provider 会返回 `1` 并说明原因。
+
+## `pulse --help`
+
+打印用法并以 `0` 退出。
+
+**此前 `--help` 会启动悬浮窗。** 所有模式都靠
+`CommandLine.arguments.contains(...)` 判断，没匹配上的一律落到"启动悬浮窗"，
+而悬浮窗是前台阻塞的——于是在任何装了组件的机器上（也就是所有机器），用法
+文本都读不到。
+
+## 设置文件与 `PULSE_DEFAULTS_SUITE`
+
+设置存在 `~/.config/Pulse.plist`（macOS 上是 bundle 自己的 domain）。删除该
+文件即可重置。
+
+跑测试时用 `Scripts/linux/test.sh`，或自己带上
+`PULSE_DEFAULTS_SUITE=pulse-tests`：
+
+```bash
+PULSE_DEFAULTS_SUITE=pulse-tests swift test
+```
+
+**因为测试会写设置。** 整个程序都通过 `PulseDefaults.shared` 这一个
+`UserDefaults` 读写，所以改设置就是改开发者的设置——`swift test` 跑完会把
+`~/.config/Pulse.plist` 留成某个 fixture 的 `['codex#test']`，盖掉本来选好的
+轨道。这个变量把那些写入指向一个用完即弃的 suite。CI 也设置了它。
+
 ## 无头登录：目前不存在
 
 **这是当前阶段一的真实缺口，不是待办的口头承诺。**
