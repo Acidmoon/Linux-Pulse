@@ -298,11 +298,9 @@ final class Panel {
 
     /// One step of the animation.
     func tick() {
-        if ProcessInfo.processInfo.environment["PULSE_PANEL_DEBUG"] != nil {
-            ticks += 1
-            if ticks % 30 == 1 {
-                FileHandle.standardError.write(Data("tick \(ticks)\n".utf8))
-            }
+        ticks += 1
+        if ProcessInfo.processInfo.environment["PULSE_PANEL_DEBUG"] != nil, ticks % 60 == 1 {
+            FileHandle.standardError.write(Data("tick \(ticks)\n".utf8))
         }
         // **Which display the panel is on, sampled rather than listened for.**
         // Upstream's rule and its reason: the pointer is the whole definition of
@@ -317,7 +315,18 @@ final class Panel {
         guard let area else { return }
         let now = Date()
         model.advance(to: now)
-        pulse_widget_queue_draw(area)
+        // **Only when something is moving, plus a slow heartbeat.** Everything
+        // on the rail is still most of the time, and redrawing a transparent
+        // 342×1080 window thirty times a second to show the same six-point
+        // sliver cost a quarter of a core — measured, and the reason this is a
+        // question rather than a habit.
+        //
+        // The heartbeat is for the things that change without moving: the window
+        // clock's arc creeps, and a reading can arrive from a pass that was
+        // started before the last frame. Two seconds is far finer than either.
+        if model.takeRedrawRequest() || ticks % 60 == 0 {
+            pulse_widget_queue_draw(area)
+        }
     }
 
     // MARK: - The C callbacks

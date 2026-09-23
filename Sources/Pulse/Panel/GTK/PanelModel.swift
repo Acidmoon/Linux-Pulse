@@ -78,6 +78,9 @@ package final class PanelModel {
     private var isQuiet = false
     private var lastActivity = Date()
     private var lastAdvance = Date()
+    /// When the rail's contents were last rebuilt. Slower than the frame rate:
+    /// see `advance`.
+    private var lastEntryBuild = Date.distantPast
     /// The minute the window clock is drawn against, and only when it is on.
     private var minute = Date()
 
@@ -90,10 +93,18 @@ package final class PanelModel {
         let settings = AppSettings.restored()
         self.settings = settings
         self.store = UsageStore(settings: settings)
-        // `PanelPlacement()` restores the edge and the floating/docked choice from
-        // the reader's own settings — it is where upstream reads them too, and
-        // nothing here should have a second opinion about where the rail goes.
-        self.placement = PanelPlacement()
+        // **`restored()`, not `PanelPlacement()`.** The bare initializer is the
+        // *default* placement — docked right, centred — and says so: upstream
+        // writes `PanelPlacement(dock: .edge(.right), ...)` as its no-argument
+        // case. `restored()` is the one that reads the reader's own edge, dock
+        // and ratios.
+        //
+        // The first version called `PanelPlacement()` with a comment claiming it
+        // restored the settings, which it does not, so every choice made in the
+        // settings file was silently overridden by the default: a rail set to the
+        // left edge appeared on the right. Found by running it against a
+        // settings file that had been set to the left.
+        self.placement = PanelPlacement.restored()
         rebuildEntries(at: Date())
     }
 
@@ -219,6 +230,52 @@ package final class PanelModel {
                                  docked: placement.isDocked)?.id
     }
 
+    /// Whether anything on the rail is **moving**, so the panel has to be drawn
+    /// again.
+    ///
+    /// **Because redrawing a 342×1080 transparent window thirty times a second
+    /// costs a quarter of a core to show a six-point sliver.** Measured: 26% of
+    /// a core in a release build with one ring and nothing happening, which is
+    /// the state the panel is in almost all of the time. Everything on this rail
+    /// is either still or one of four things that move, so those four are what
+    /// this asks about:
+    ///
+    ///   - the opening and closing spring, while it is still settling
+    ///   - a CLI that is working — the travelling mark
+    ///   - an account drawing the animated mark, which is never still
+    ///   - a refresh in flight, which dims the arc until it lands
+    ///
+    /// The figure changing is the fifth, and it is not something that *moves* —
+    /// it arrives — so it is a flag the entry rebuild sets rather than something
+    /// this can see by looking.
+    package var needsRedraw: Bool {
+        if abs(openness.value - openness.target) > 0.001 || abs(openness.velocity) > 0.01 {
+            return true
+        }
+        if contentChanged { return true }
+        return entries.contains { $0.isRunning || $0.isRefreshing || $0.showsBotMark }
+    }
+
+    /// Whether last time's readings differ from this time's, set where they are
+    /// rebuilt. Cleared by `takeRedrawRequest`.
+    private var contentChanged = true
+
+    /// One question, asked once per tick: draw, or not?
+    ///
+    /// The flag is cleared here rather than read, so a change that arrives while
+    /// nothing else is moving gets exactly one frame.
+    package func takeRedrawRequest() -> Bool {
+        let wanted = needsRedraw
+        contentChanged = false
+        return wanted
+    }
+
+    /// The readings, as a value that changes when anything visible about them
+    /// does. A signature rather than a comparison of the entries themselves,
+    /// because comparing two arrays of `RailEntry` walks every window of every
+    /// account thirty times a second.
+    private var contentSignature: [String] = []
+
     /// Whether any ring has a reading yet. A render waits for this; the window
     /// does not, because it is redrawn thirty times a second either way.
     package var hasAnyReading: Bool {
@@ -231,23 +288,47 @@ package final class PanelModel {
     /// rate upstream's view chose: everything the mark plays is slow, and seven
     /// engines redrawing at the display's rate is work nobody can see.
     package func advance(to date: Date) {
-        // The rail's own animation first, so the pointer's arrival and the
-        // rings' fade are in step with the mark's.
-        let elapsed = min(max(date.timeIntervalSince(lastAdvance), 0), 0.25)
-        lastAdvance = date
-        openness.target = (isHovered || !placement.isDocked || !settings.autoCollapse) ? 1 : 0
-        // Substepped the way the mark is: a spring integrated at 30fps and at
-        // 120fps should reach the same place.
-        var remaining = elapsed
-        while remaining > 0 {
-            let step = min(BotMath.fixedStep, remaining)
-            openness.step(frequency: 2 * .pi / 0.32, damping: 0.86, delta: step)
-            remaining -= step
+        // **The rail is rebuilt on a slower clock than it is drawn on.** A
+        // reading arrives once a pass, which is minutes; doing it thirty times a
+        // second was a third of this method's cost and none of its point. The
+        // springs and the marks still keep their own time.
+        if date.timeIntervalSince(lastEntryBuild) > 0.5 || entries.isEmpty {
+            lastEntryBuild = date
+            minute = date
+            if date.timeIntervalSince(lastActivity) > 20 * 60 { isQuiet = true }
+            rebuildEntries(at: date)
         }
 
-        minute = date
-        if date.timeIntervalSince(lastActivity) > 20 * 60 { isQuiet = true }
-        rebuildEntries(at: date)
+        // **The target first, always, and only then whether to integrate.** The
+        // first version of this put the target inside the "is it moving" test —
+        // and that test compares the value against the target, so a rail at rest
+        // with the pointer on it never set its target and never moved: hovering
+        // did nothing at all. Found by pointing at it, not by reading it.
+        openness.target = (isHovered || !placement.isDocked || !settings.autoCollapse) ? 1 : 0
+
+        // And the integration only while there is something to integrate. A
+        // settled spring is a multiply, an add and a comparison thirty times a
+        // second for an answer that has not changed.
+        let elapsed = min(max(date.timeIntervalSince(lastAdvance), 0), 0.25)
+        lastAdvance = date
+        if abs(openness.value - openness.target) > 0.0005 || abs(openness.velocity) > 0.005 {
+            // Substepped the way the mark is: a spring integrated at 30fps and
+            // at 120fps should reach the same place.
+            var remaining = elapsed
+            while remaining > 0 {
+                let step = min(BotMath.fixedStep, remaining)
+                openness.step(frequency: 2 * .pi / 0.32, damping: 0.86, delta: step)
+                remaining -= step
+            }
+        } else {
+            openness.value = openness.target
+            openness.velocity = 0
+        }
+
+        // **And the marks are only advanced when a mark is on screen.** Nothing
+        // else reads a frame, so a rail of logos does not need seven engines
+        // stepped thirty times a second to have their answers thrown away.
+        guard entries.contains(where: \.showsBotMark) else { return }
 
         for (index, entry) in entries.enumerated() {
             let engine = engines[entry.id] ?? {
@@ -332,6 +413,15 @@ package final class PanelModel {
             if botTints.isEmpty, rebuilt.contains(where: \.showsBotMark) {
                 botTints = BotMarkTint.deal(over: rebuilt.map(\.usage.provider),
                                             chosen: rebuilt.map(\.botColour))
+            }
+            // **The figure arriving is a reason to draw.** Everything else on
+            // this rail is either still or one of the four things that move; a
+            // new reading is neither — it just appears — so it is recorded here
+            // rather than looked for by `needsRedraw`.
+            let signature = rebuilt.map { "\($0.id):\($0.headline?.percentText ?? "-"):\($0.figure ?? "-"):\($0.isRunning)" }
+            if signature != contentSignature {
+                contentSignature = signature
+                contentChanged = true
             }
             entries = rebuilt
             gaze = BotMarkGaze(edge: placement.edge)
@@ -489,7 +579,15 @@ package final class PanelModel {
         lastActivity = Date()
         isQuiet = false
         isHovered = isOverContent(point)
+        // **A change of ring is a change of picture.** The ring under the
+        // pointer is scaled and haloed, so moving from one to the next has to
+        // be drawn — and nothing about a settled spring or an idle CLI would say
+        // so. Without this the halo arrives on the next heartbeat, up to two
+        // seconds later, which reads as the panel being slow rather than as the
+        // optimisation it is.
+        let previous = selectedSlot
         selectedSlot = selectedSlot(at: point)
+        if selectedSlot != previous { contentChanged = true }
     }
 
     /// The strip's rectangle, for the debug line. Off-panel it is what the
