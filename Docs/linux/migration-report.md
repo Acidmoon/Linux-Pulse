@@ -92,7 +92,7 @@ providers, ~50 log readers, OAuth, loopback callbacks, the sealed-file store, an
 | Keychain / `LocalSecrets` | Secret Service, else a 0600 file | done in phase 1; 5 tests |
 | `SMAppService` / LaunchAgent | XDG autostart `~/.config/autostart/pulse.desktop` | done; `LinuxLoginItem`, 5 tests |
 | Sparkle | removed — system package manager or a GitHub release | done; the dependency is not resolved on Linux at all |
-| Global shortcut (`EventTap`) | **not implemented** — X11 could use `XGrabKey`, Wayland has no portable equivalent | see *Known differences* |
+| Global shortcut (`EventTap`) | **not implemented** — X11 could use `XGrabKey`, Wayland has no portable equivalent | see *Known differences*; the blocking reason is not `XGrabKey` |
 | Chromium cookie reading | same browsers, Linux config paths | done in phase 1 |
 | `*.lproj` | the same `.lproj` tables, through `Bundle.module` | done; **and the interpolated keys now resolve** — see below |
 | codesign / `xattr` | not needed | n/a |
@@ -119,11 +119,25 @@ there the panel stays on whichever display it was put on. And this machine has
 one display, so all that is verified is that a single-display system never moves
 the panel. A second screen is the one thing this port could not test.
 
-**No global shortcut.** Upstream registers one through `EventTap`. On X11 that is
-`XGrabKey` and would work; on Wayland a global shortcut needs a compositor
-portal, which is a different protocol per desktop and not portable. Rather than
-implement half of it, the feature is absent and the panel is reached by clicking
-it. The tray below is the intended replacement.
+**No global shortcut, and `XGrabKey` is not what is in the way.** On X11 a grab
+is a second X connection and a thread to read it — writable. On Wayland it needs
+a compositor portal, which is a different protocol per desktop. But the reason
+this is absent is earlier than either:
+
+  - **There is nothing to configure it with.** The shortcut is stored rather than
+    hardcoded, and upstream says why at length: "a default combination is a key
+    taken out of every other app's hands on behalf of a person who never asked
+    for it, and there is no combination free enough to take that way". So it is
+    unset until somebody sets it — and setting it lives in the Settings window,
+    which is 5,753 lines of SwiftUI and not part of this port's phases. A key
+    grab with no way to choose the key is dead code.
+  - **The stored value would name a different key.** `ShortcutValue.swift` has
+    said so since phase 1: the container is portable, and its two numbers mean
+    "a position on an Apple keyboard" and AppKit's modifier bits. X11 keycodes
+    are a different numbering of a different keyboard, so a combination carried
+    over from a Mac settings file would silently mean something else.
+
+The panel is reached by clicking it, and quit from its own right-click menu.
 
 **No tray icon.** GTK4 has no tray API; an icon means a StatusNotifierItem over
 D-Bus, which is a component rather than a binding. The panel itself is the
