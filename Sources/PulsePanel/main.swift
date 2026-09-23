@@ -202,7 +202,19 @@ final class Panel {
             // so there is no frame to read back either. Reaching this branch at
             // all means the compositor has no layer shell: Mutter, which
             // implements none of it.
-            if pulse_layer_shell_supported() != 1 {
+            // **Guarded, because the library may not be in the build at all.**
+            // Ubuntu does not package gtk4-layer-shell, so `PULSE_HAVE_LAYER_SHELL`
+            // is a compile-time question here and not only a runtime one — and
+            // calling it unguarded is a **build failure on a clean Ubuntu**,
+            // which is exactly what CI caught and this machine did not, because
+            // the last local check of that path was made before this line
+            // existed.
+            #if canImport(CGTK4LayerShell)
+            let layerShellMissing = pulse_layer_shell_supported() != 1
+            #else
+            let layerShellMissing = true
+            #endif
+            if layerShellMissing {
                 FileHandle.standardError.write(Data("""
                 Pulse: this Wayland compositor has no layer-shell support, so the \
                 panel cannot be docked to the screen edge or kept above other \
