@@ -11,7 +11,7 @@ final class AppSettings {
     var isPanelVisible: Bool {
         didSet {
             guard isPanelVisible != oldValue else { return }
-            UserDefaults.standard.set(isPanelVisible, forKey: Key.panelVisible)
+            PulseDefaults.shared.set(isPanelVisible, forKey: Key.panelVisible)
             onChange?()
         }
     }
@@ -25,7 +25,7 @@ final class AppSettings {
     var hidesMenuBarIcon: Bool {
         didSet {
             guard hidesMenuBarIcon != oldValue else { return }
-            UserDefaults.standard.set(hidesMenuBarIcon, forKey: Key.hidesMenuBarIcon)
+            PulseDefaults.shared.set(hidesMenuBarIcon, forKey: Key.hidesMenuBarIcon)
             onMenuBarIconChange?()
         }
     }
@@ -40,7 +40,7 @@ final class AppSettings {
     var hidesInFullScreen: Bool {
         didSet {
             guard hidesInFullScreen != oldValue else { return }
-            UserDefaults.standard.set(hidesInFullScreen, forKey: Key.hidesInFullScreen)
+            PulseDefaults.shared.set(hidesInFullScreen, forKey: Key.hidesInFullScreen)
             onChange?()
         }
     }
@@ -58,7 +58,7 @@ final class AppSettings {
     var followsActiveDisplay: Bool {
         didSet {
             guard followsActiveDisplay != oldValue else { return }
-            UserDefaults.standard.set(followsActiveDisplay, forKey: Key.followsActiveDisplay)
+            PulseDefaults.shared.set(followsActiveDisplay, forKey: Key.followsActiveDisplay)
             onChange?()
         }
     }
@@ -72,7 +72,7 @@ final class AppSettings {
     var openSettingsShortcut: GlobalShortcut? {
         didSet {
             guard openSettingsShortcut != oldValue else { return }
-            UserDefaults.standard.set(openSettingsShortcut?.storage, forKey: Key.openSettingsShortcut)
+            PulseDefaults.shared.set(openSettingsShortcut?.storage, forKey: Key.openSettingsShortcut)
         }
     }
 
@@ -81,7 +81,7 @@ final class AppSettings {
     var togglePanelShortcut: GlobalShortcut? {
         didSet {
             guard togglePanelShortcut != oldValue else { return }
-            UserDefaults.standard.set(togglePanelShortcut?.storage, forKey: Key.togglePanelShortcut)
+            PulseDefaults.shared.set(togglePanelShortcut?.storage, forKey: Key.togglePanelShortcut)
         }
     }
 
@@ -95,7 +95,7 @@ final class AppSettings {
     var deepSeekBasis: DeepSeekBasis {
         didSet {
             guard deepSeekBasis != oldValue else { return }
-            UserDefaults.standard.set(deepSeekBasis.rawValue, forKey: Key.deepSeekBasis)
+            PulseDefaults.shared.set(deepSeekBasis.rawValue, forKey: Key.deepSeekBasis)
             onChange?()
         }
     }
@@ -105,7 +105,7 @@ final class AppSettings {
     var deepSeekBudget: Double? {
         didSet {
             guard deepSeekBudget != oldValue else { return }
-            UserDefaults.standard.set(deepSeekBudget, forKey: Key.deepSeekBudget)
+            PulseDefaults.shared.set(deepSeekBudget, forKey: Key.deepSeekBudget)
             onChange?()
         }
     }
@@ -115,7 +115,7 @@ final class AppSettings {
     var deepSeekCurrency: String? {
         didSet {
             guard deepSeekCurrency != oldValue else { return }
-            UserDefaults.standard.set(deepSeekCurrency, forKey: Key.deepSeekCurrency)
+            PulseDefaults.shared.set(deepSeekCurrency, forKey: Key.deepSeekCurrency)
             onChange?()
         }
     }
@@ -129,7 +129,7 @@ final class AppSettings {
     var lowBalanceAlerts: [String: Double] {
         didSet {
             guard lowBalanceAlerts != oldValue else { return }
-            UserDefaults.standard.set(lowBalanceAlerts, forKey: Key.lowBalanceAlerts)
+            PulseDefaults.shared.set(lowBalanceAlerts, forKey: Key.lowBalanceAlerts)
             onChange?()
         }
     }
@@ -145,7 +145,7 @@ final class AppSettings {
     var providerOrder: [String] {
         didSet {
             guard providerOrder != oldValue else { return }
-            UserDefaults.standard.set(providerOrder, forKey: Key.providerOrder)
+            PulseDefaults.shared.set(providerOrder, forKey: Key.providerOrder)
             // Deliberately no `onChange`: that is how the AppKit side hears
             // about settings the *usage loop* cares about, and it refetches
             // every provider when it fires. Rearranging the rail is a layout
@@ -163,7 +163,7 @@ final class AppSettings {
             // measure the panel, and the rail is now longer than it was.
             PanelMetrics.makeRoom(for: railSlotCount)
             let data = try? JSONEncoder().encode(extraAccounts)
-            UserDefaults.standard.set(data, forKey: Key.extraAccounts)
+            PulseDefaults.shared.set(data, forKey: Key.extraAccounts)
             onChange?()
         }
     }
@@ -297,7 +297,7 @@ final class AppSettings {
                 enabledAccounts = oldValue
                 return
             }
-            UserDefaults.standard.set(Array(enabledAccounts), forKey: ProviderSelection.enabledKey)
+            PulseDefaults.shared.set(Array(enabledAccounts), forKey: ProviderSelection.enabledKey)
             onChange?()
         }
     }
@@ -319,7 +319,7 @@ final class AppSettings {
         didSet {
             guard language != oldValue else { return }
             LocalizationSource.use(language)
-            UserDefaults.standard.set(language.rawValue, forKey: Key.language)
+            PulseDefaults.shared.set(language.rawValue, forKey: Key.language)
             onChange?()
         }
     }
@@ -329,7 +329,7 @@ final class AppSettings {
     var pinnedWindows: [String: String] {
         didSet {
             guard pinnedWindows != oldValue else { return }
-            UserDefaults.standard.set(pinnedWindows, forKey: Key.pinnedWindows)
+            PulseDefaults.shared.set(pinnedWindows, forKey: Key.pinnedWindows)
             onChange?()
         }
     }
@@ -340,7 +340,7 @@ final class AppSettings {
     var ringTints: [String: String] {
         didSet {
             guard ringTints != oldValue else { return }
-            UserDefaults.standard.set(ringTints, forKey: Key.ringTints)
+            PulseDefaults.shared.set(ringTints, forKey: Key.ringTints)
         }
     }
 
@@ -361,7 +361,7 @@ final class AppSettings {
     var botMarks: [String: Bool] {
         didSet {
             guard botMarks != oldValue else { return }
-            UserDefaults.standard.set(botMarks, forKey: Key.botMarks)
+            PulseDefaults.shared.set(botMarks, forKey: Key.botMarks)
         }
     }
 
@@ -374,7 +374,7 @@ final class AppSettings {
     var botPersonas: [String: String] {
         didSet {
             guard botPersonas != oldValue else { return }
-            UserDefaults.standard.set(botPersonas, forKey: Key.botPersonas)
+            PulseDefaults.shared.set(botPersonas, forKey: Key.botPersonas)
         }
     }
 
@@ -387,7 +387,7 @@ final class AppSettings {
     var botColours: [String: String] {
         didSet {
             guard botColours != oldValue else { return }
-            UserDefaults.standard.set(botColours, forKey: Key.botColours)
+            PulseDefaults.shared.set(botColours, forKey: Key.botColours)
         }
     }
 
@@ -402,7 +402,7 @@ final class AppSettings {
     var botShapes: [String: String] {
         didSet {
             guard botShapes != oldValue else { return }
-            UserDefaults.standard.set(botShapes, forKey: Key.botShapes)
+            PulseDefaults.shared.set(botShapes, forKey: Key.botShapes)
         }
     }
 
@@ -414,7 +414,7 @@ final class AppSettings {
     var sessionBrowsers: [String: String] {
         didSet {
             guard sessionBrowsers != oldValue else { return }
-            UserDefaults.standard.set(sessionBrowsers, forKey: Key.sessionBrowsers)
+            PulseDefaults.shared.set(sessionBrowsers, forKey: Key.sessionBrowsers)
         }
     }
 
@@ -423,7 +423,7 @@ final class AppSettings {
     var sources: [String: String] {
         didSet {
             guard sources != oldValue else { return }
-            UserDefaults.standard.set(sources, forKey: Key.sources)
+            PulseDefaults.shared.set(sources, forKey: Key.sources)
             onChange?()
         }
     }
@@ -432,7 +432,7 @@ final class AppSettings {
     var refreshInterval: RefreshInterval {
         didSet {
             guard refreshInterval != oldValue else { return }
-            UserDefaults.standard.set(refreshInterval.rawValue, forKey: Key.refreshInterval)
+            PulseDefaults.shared.set(refreshInterval.rawValue, forKey: Key.refreshInterval)
             onChange?()
         }
     }
@@ -470,7 +470,7 @@ final class AppSettings {
             // going to measure the panel, and it has to already be the new
             // size when they do.
             PanelMetrics.use(panelSize)
-            UserDefaults.standard.set(panelSize.rawValue, forKey: Key.panelSize)
+            PulseDefaults.shared.set(panelSize.rawValue, forKey: Key.panelSize)
             onChange?()
         }
     }
@@ -489,7 +489,7 @@ final class AppSettings {
             // does it: this changes the rail's thickness, and whoever reacts
             // is about to measure the panel.
             PanelMetrics.showTopPercentages(topRailShowsPercentages)
-            UserDefaults.standard.set(topRailShowsPercentages, forKey: Key.topRailShowsPercentages)
+            PulseDefaults.shared.set(topRailShowsPercentages, forKey: Key.topRailShowsPercentages)
             onChange?()
         }
     }
@@ -501,7 +501,7 @@ final class AppSettings {
             // Before the change is announced, like `panelSize`: whoever reacts
             // is about to measure the rail.
             PanelMetrics.use(railSpacing)
-            UserDefaults.standard.set(railSpacing.rawValue, forKey: Key.railSpacing)
+            PulseDefaults.shared.set(railSpacing.rawValue, forKey: Key.railSpacing)
             onChange?()
         }
     }
@@ -518,7 +518,7 @@ final class AppSettings {
             // Before the change is announced, like `panelSize`: whoever reacts
             // is about to measure the rail, and it just got shorter or longer.
             PanelMetrics.showSidePercentages(sideRailShowsPercentages)
-            UserDefaults.standard.set(sideRailShowsPercentages, forKey: Key.sideRailShowsPercentages)
+            PulseDefaults.shared.set(sideRailShowsPercentages, forKey: Key.sideRailShowsPercentages)
             onChange?()
         }
     }
@@ -538,7 +538,7 @@ final class AppSettings {
         didSet {
             guard labelAboveRing != oldValue else { return }
             PanelMetrics.putLabelAboveRing(labelAboveRing)
-            UserDefaults.standard.set(labelAboveRing, forKey: Key.labelAboveRing)
+            PulseDefaults.shared.set(labelAboveRing, forKey: Key.labelAboveRing)
             onChange?()
         }
     }
@@ -565,7 +565,7 @@ final class AppSettings {
         didSet {
             guard usesRoundEnds != oldValue else { return }
             PanelMetrics.useRoundEnds(usesRoundEnds)
-            UserDefaults.standard.set(usesRoundEnds, forKey: Key.usesRoundEnds)
+            PulseDefaults.shared.set(usesRoundEnds, forKey: Key.usesRoundEnds)
             onChange?()
         }
     }
@@ -584,7 +584,7 @@ final class AppSettings {
     var showsWindowClock: Bool {
         didSet {
             guard showsWindowClock != oldValue else { return }
-            UserDefaults.standard.set(showsWindowClock, forKey: Key.showsWindowClock)
+            PulseDefaults.shared.set(showsWindowClock, forKey: Key.showsWindowClock)
         }
     }
 
@@ -608,7 +608,7 @@ final class AppSettings {
     var showsRemaining: Bool {
         didSet {
             guard showsRemaining != oldValue else { return }
-            UserDefaults.standard.set(showsRemaining, forKey: Key.showsRemaining)
+            PulseDefaults.shared.set(showsRemaining, forKey: Key.showsRemaining)
         }
     }
 
@@ -626,7 +626,7 @@ final class AppSettings {
     var warningThreshold: WarningThreshold {
         didSet {
             guard warningThreshold != oldValue else { return }
-            UserDefaults.standard.set(warningThreshold.rawValue, forKey: Key.warningThreshold)
+            PulseDefaults.shared.set(warningThreshold.rawValue, forKey: Key.warningThreshold)
         }
     }
 
@@ -645,7 +645,7 @@ final class AppSettings {
     var dockShowsAlertColor: Bool {
         didSet {
             guard dockShowsAlertColor != oldValue else { return }
-            UserDefaults.standard.set(dockShowsAlertColor, forKey: Key.dockShowsAlertColor)
+            PulseDefaults.shared.set(dockShowsAlertColor, forKey: Key.dockShowsAlertColor)
         }
     }
 
@@ -684,7 +684,7 @@ final class AppSettings {
     /// stored no longer names an offered range.
     ///
     /// Takes the store as an argument, rather than reaching for
-    /// `UserDefaults.standard`, so the round trip can be pinned against an
+    /// `PulseDefaults.shared`, so the round trip can be pinned against an
     /// isolated suite. `restored()` and `spendSpan`'s `didSet` both go through
     /// this and `storeSpendSpan`, so what a test exercises is the one
     /// production uses.
@@ -717,7 +717,7 @@ final class AppSettings {
         didSet {
             guard showsForecast != oldValue else { return }
             PanelMetrics.showForecast(showsForecast)
-            UserDefaults.standard.set(showsForecast, forKey: Key.showsForecast)
+            PulseDefaults.shared.set(showsForecast, forKey: Key.showsForecast)
             onChange?()
         }
     }
@@ -746,7 +746,7 @@ final class AppSettings {
     var usesGlass: Bool {
         didSet {
             guard usesGlass != oldValue else { return }
-            UserDefaults.standard.set(usesGlass, forKey: Key.usesGlass)
+            PulseDefaults.shared.set(usesGlass, forKey: Key.usesGlass)
             onChange?()
         }
     }
@@ -760,7 +760,7 @@ final class AppSettings {
     var autoCollapse: Bool {
         didSet {
             guard autoCollapse != oldValue else { return }
-            UserDefaults.standard.set(autoCollapse, forKey: Key.autoCollapse)
+            PulseDefaults.shared.set(autoCollapse, forKey: Key.autoCollapse)
             onChange?()
         }
     }
@@ -775,7 +775,7 @@ final class AppSettings {
     var alertThreshold: AlertThreshold {
         didSet {
             guard alertThreshold != oldValue else { return }
-            UserDefaults.standard.set(alertThreshold.rawValue, forKey: Key.alertThreshold)
+            PulseDefaults.shared.set(alertThreshold.rawValue, forKey: Key.alertThreshold)
         }
     }
 
@@ -788,7 +788,7 @@ final class AppSettings {
     var alertsOnReset: Bool {
         didSet {
             guard alertsOnReset != oldValue else { return }
-            UserDefaults.standard.set(alertsOnReset, forKey: Key.alertsOnReset)
+            PulseDefaults.shared.set(alertsOnReset, forKey: Key.alertsOnReset)
         }
     }
 
@@ -802,7 +802,7 @@ final class AppSettings {
     var alertsOnFailure: Bool {
         didSet {
             guard alertsOnFailure != oldValue else { return }
-            UserDefaults.standard.set(alertsOnFailure, forKey: Key.alertsOnFailure)
+            PulseDefaults.shared.set(alertsOnFailure, forKey: Key.alertsOnFailure)
         }
     }
 
@@ -827,7 +827,7 @@ final class AppSettings {
     var showsSecondRing: Bool {
         didSet {
             guard showsSecondRing != oldValue else { return }
-            UserDefaults.standard.set(showsSecondRing, forKey: Key.showsSecondRing)
+            PulseDefaults.shared.set(showsSecondRing, forKey: Key.showsSecondRing)
             onChange?()
         }
     }
@@ -845,7 +845,7 @@ final class AppSettings {
             // The rail is about to get longer. Before the change is announced,
             // so whoever re-measures the panel sees the size it will be.
             PanelMetrics.makeRoom(for: railSlotCount)
-            UserDefaults.standard.set(Array(splitAccounts), forKey: Key.splitAccounts)
+            PulseDefaults.shared.set(Array(splitAccounts), forKey: Key.splitAccounts)
             onChange?()
         }
     }
@@ -862,7 +862,7 @@ final class AppSettings {
     var animatesRingActivity: Bool {
         didSet {
             guard animatesRingActivity != oldValue else { return }
-            UserDefaults.standard.set(animatesRingActivity, forKey: Key.animatesRingActivity)
+            PulseDefaults.shared.set(animatesRingActivity, forKey: Key.animatesRingActivity)
         }
     }
 
@@ -1049,10 +1049,13 @@ final class AppSettings {
 
     /// The colour chosen for an account's mark, or nil for its brand colour.
     ///
-    /// Excluded from Linux with the rest of the colour handling: `RingTint`
-    /// lives in the AppKit-drawn panel, and the stored hex is what actually
-    /// persists — the getter is only how the settings picker reads it back.
-    #if canImport(SwiftUI)
+    /// **Not behind `canImport(SwiftUI)` any more.** It was, because it returns
+    /// a `Color` and this file does not import SwiftUI: on Linux the colour
+    /// handling was skipped wholesale, on the reading that `RingTint` lives in
+    /// the AppKit-drawn panel. `RingTint` is upstream's own table of choices and
+    /// the Linux panel needs it, and `Color` exists on both platforms now
+    /// (`Platform/DrawingCompat.swift`) — so the guard was only hiding a getter
+    /// whose stored value is the hex either way.
     func botColour(for account: AccountKey) -> Color? {
         RingTint.color(from: botColours[account.id])
     }
@@ -1072,7 +1075,6 @@ final class AppSettings {
         updated[account.id] = hex
         botColours = updated
     }
-    #endif
 
     /// The shape an account's mark wears. A stored value that no longer
     /// names a shape reads as round rather than as a blank ring.
@@ -1088,7 +1090,6 @@ final class AppSettings {
     }
 
     /// The colour chosen for an account's ring, or nil to colour it by usage.
-    #if canImport(SwiftUI)
     func ringTint(for account: AccountKey) -> Color? {
         RingTint.color(from: ringTints[account.id])
     }
@@ -1111,7 +1112,6 @@ final class AppSettings {
         updated[account.id] = hex
         ringTints = updated
     }
-    #endif
 
     /// The browser an account's session is read from, or nil for "whichever".
     func sessionBrowser(for account: AccountKey) -> BrowserCookies.Browser? {
@@ -1164,7 +1164,7 @@ final class AppSettings {
     }
 
     static func storedRail() -> StoredRail {
-        let defaults = UserDefaults.standard
+        let defaults = PulseDefaults.shared
 
         let extras = defaults.data(forKey: Key.extraAccounts)
             .flatMap { try? JSONDecoder().decode([ExtraAccount].self, from: $0) } ?? []
@@ -1194,7 +1194,7 @@ final class AppSettings {
     }
 
     static func restored() -> AppSettings {
-        let defaults = UserDefaults.standard
+        let defaults = PulseDefaults.shared
 
         let visible = defaults.object(forKey: Key.panelVisible) as? Bool ?? true
 

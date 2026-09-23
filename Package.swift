@@ -182,7 +182,7 @@ let package = Package(
     // `pulse --json` has to keep working on a machine with no GUI libraries at
     // all — a link-time dependency would take that away.
     products: [
-        .executable(name: "Pulse", targets: ["Pulse"])
+        .executable(name: "Pulse", targets: ["PulseCLI"])
     ] + panelProducts,
     dependencies: platformDependencies,
     targets: [
@@ -197,7 +197,14 @@ let package = Package(
             pkgConfig: cSQLitePkgConfig,
             providers: cSQLiteProviders
         ),
-        .executableTarget(
+        // **A library, and the executables above it are thin.** It held the
+        // CLI's `@main` until the panel needed to import it: SwiftPM gives a
+        // dependent target an empty module when the dependency is an
+        // executable, so nothing in here was reachable from `PulsePanel` —
+        // measured by putting a `public func` here and failing to see it. The
+        // two executables are `Sources/PulseCLI` and `Sources/PulsePanel`; the
+        // board product is still called `Pulse`.
+        .target(
             name: "Pulse",
             dependencies: pulseDependencies,
             path: "Sources/Pulse",
@@ -205,6 +212,11 @@ let package = Package(
                 .process("Resources")
             ],
             linkerSettings: pulseLinkerSettings
+        ),
+        .executableTarget(
+            name: "PulseCLI",
+            dependencies: ["Pulse"],
+            path: "Sources/PulseCLI"
         ),
         // Tests the executable target directly rather than through a library
         // split. Pulse is one app, not a framework with an app on top, and

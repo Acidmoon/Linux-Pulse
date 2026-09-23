@@ -2,7 +2,7 @@ import Foundation
 
 /// Carries settings over the first time Pulse runs as an app bundle.
 ///
-/// `UserDefaults.standard` writes to a domain named after the bundle
+/// `PulseDefaults.shared` writes to a domain named after the bundle
 /// identifier — and, when there is no bundle, after the process name. So a
 /// loose `swift run Pulse` build has been keeping everything in a domain called
 /// `Pulse`, and the moment the same app runs from `Pulse.app` it reads a
@@ -19,7 +19,7 @@ import Foundation
 /// an installed `Pulse.app` are two copies of the app and should not be editing
 /// each other's settings.
 enum LegacyDefaults {
-    /// What `UserDefaults.standard` resolves to for a bare executable.
+    /// What `PulseDefaults.shared` resolves to for a bare executable.
     private static let looseBinaryDomain = "Pulse"
     private static let flag = "settings.adoptedLooseBinaryDefaults"
 
@@ -27,7 +27,7 @@ enum LegacyDefaults {
         // Nothing to do in the loose build — it *is* the old domain.
         guard Bundle.main.bundleIdentifier != nil else { return }
 
-        let defaults = UserDefaults.standard
+        let defaults = PulseDefaults.shared
         guard !defaults.bool(forKey: flag) else { return }
         defaults.set(true, forKey: flag)
 

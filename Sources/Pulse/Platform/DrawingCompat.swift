@@ -308,8 +308,8 @@ class CGPath: Equatable {
                 pen = includeCurve(pen, control1, control2, point, cubic: true)
             case .arc(let centre, let radius, let start, let end, let clockwise):
                 var sweep = (end - start).truncatingRemainder(dividingBy: 2 * .pi)
-                if clockwise, sweep > 0 { sweep -= 2 * .pi }
-                if !clockwise, sweep < 0 { sweep += 2 * .pi }
+                if clockwise, sweep < 0 { sweep += 2 * .pi }
+                if !clockwise, sweep > 0 { sweep -= 2 * .pi }
                 include(CGPoint(x: centre.x + radius * cos(start), y: centre.y + radius * sin(start)))
                 include(CGPoint(x: centre.x + radius * cos(end), y: centre.y + radius * sin(end)))
                 // The four axis crossings the sweep passes through put the
@@ -518,7 +518,7 @@ extension PathCommand {
 /// The colour space `Color.init?(hex:)` names. There is one on Linux, so this
 /// is a spelling rather than a choice — `SwiftUI` has the same case and the
 /// initializer below ignores it either way.
-enum RGBColorSpace: Sendable {
+package enum RGBColorSpace: Sendable {
     case sRGB
 }
 
@@ -531,13 +531,13 @@ enum RGBColorSpace: Sendable {
 /// `BotMarkTint.lifted` exists for: it measures a brand colour's luminance and
 /// mixes it toward white until it clears the disc. That needs the numbers, so
 /// they are stored rather than looked up.
-struct Color: Hashable, Sendable {
-    var red: Double
-    var green: Double
-    var blue: Double
-    var opacity: Double
+package struct Color: Hashable, Sendable {
+    package var red: Double
+    package var green: Double
+    package var blue: Double
+    package var opacity: Double
 
-    init(red: Double, green: Double, blue: Double, opacity: Double = 1) {
+    package init(red: Double, green: Double, blue: Double, opacity: Double = 1) {
         self.red = red
         self.green = green
         self.blue = blue
@@ -547,20 +547,28 @@ struct Color: Hashable, Sendable {
     /// The `SwiftUI` spelling, with the colour space named. The space is
     /// accepted and ignored: a Linux colour is sRGB because that is what the
     /// screen is, not because it was told.
-    init(_ space: RGBColorSpace, red: Double, green: Double, blue: Double, opacity: Double = 1) {
+    package init(_ space: RGBColorSpace, red: Double, green: Double, blue: Double, opacity: Double = 1) {
         self.init(red: red, green: green, blue: blue, opacity: opacity)
     }
 
     /// Grayscale, which is how the eyes are coloured.
-    init(white: Double, opacity: Double = 1) {
+    package init(white: Double, opacity: Double = 1) {
         self.init(red: white, green: white, blue: white, opacity: opacity)
     }
 
-    static let white = Color(white: 1)
-    static let black = Color(white: 0)
-    static let clear = Color(white: 0, opacity: 0)
+    package static let white = Color(white: 1)
 
-    func opacity(_ value: Double) -> Color {
+    /// `SwiftUI`'s semantic "the colour that reads on this surface", which on a
+    /// Mac flips with the appearance. **White here, and that is not a
+    /// simplification**: the panel has one surface and it is black — upstream's
+    /// own default, `PanelSurface`'s `shape.fill(tint ?? .black)` — so the
+    /// colour that reads on it is white, and the track behind every ring is
+    /// this at 18%.
+    package static let primary = Color(white: 1)
+    package static let black = Color(white: 0)
+    package static let clear = Color(white: 0, opacity: 0)
+
+    package func opacity(_ value: Double) -> Color {
         Color(red: red, green: green, blue: blue, opacity: opacity * value)
     }
 
@@ -570,9 +578,9 @@ struct Color: Hashable, Sendable {
     /// and that call has no Linux answer. Rather than write an AppKit stub that
     /// would have to pretend about colour spaces, the components are simply
     /// here — this type has no other space to convert from.
-    var redComponent: Double { red }
-    var greenComponent: Double { green }
-    var blueComponent: Double { blue }
+    package var redComponent: Double { red }
+    package var greenComponent: Double { green }
+    package var blueComponent: Double { blue }
 }
 
 #endif

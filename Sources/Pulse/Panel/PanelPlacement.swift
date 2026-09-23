@@ -215,7 +215,7 @@ final class PanelPlacement {
     var isDocked: Bool { dock.isDocked }
 
     static func restored() -> PanelPlacement {
-        let defaults = UserDefaults.standard
+        let defaults = PulseDefaults.shared
 
         let dock: PanelDock = if defaults.object(forKey: Key.floating) as? Bool == true {
             .floating
@@ -306,7 +306,7 @@ final class PanelPlacement {
         self.verticalRatio = verticalRatio.clampedToUnitRange
         self.display = display
 
-        let defaults = UserDefaults.standard
+        let defaults = PulseDefaults.shared
         defaults.set(!dock.isDocked, forKey: Key.floating)
         if let edge = dock.edge { defaults.set(edge.rawValue, forKey: Key.edge) }
         defaults.set(self.horizontalRatio, forKey: Key.horizontalRatio)

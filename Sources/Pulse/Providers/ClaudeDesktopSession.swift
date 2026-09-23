@@ -184,16 +184,16 @@ enum ClaudeDesktopSession {
     /// have to be taken again at the next launch. It holds no secret: it is a
     /// yes or a no about a prompt.
     private(set) static var wasPermitted: Bool {
-        get { UserDefaults.standard.bool(forKey: permissionKey) }
-        set { UserDefaults.standard.set(newValue, forKey: permissionKey) }
+        get { PulseDefaults.shared.bool(forKey: permissionKey) }
+        set { PulseDefaults.shared.set(newValue, forKey: permissionKey) }
     }
 
     /// Whether the launch-time ask has happened at all. Separate from the
     /// answer, because "not yet asked" and "asked and refused" call for
     /// opposite behaviour and a single flag cannot say which it is.
     private static var wasAsked: Bool {
-        get { UserDefaults.standard.bool(forKey: askedKey) }
-        set { UserDefaults.standard.set(newValue, forKey: askedKey) }
+        get { PulseDefaults.shared.bool(forKey: askedKey) }
+        set { PulseDefaults.shared.set(newValue, forKey: askedKey) }
     }
 
     private static let permissionKey = "claudeDesktop.keychainGranted"

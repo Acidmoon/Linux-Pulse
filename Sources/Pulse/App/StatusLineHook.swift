@@ -84,7 +84,7 @@ enum StatusLineHook {
     /// with the same input and show its output, so installing Pulse doesn't
     /// quietly throw away their own status line.
     private static func chainedOutput(for input: Data) -> String? {
-        guard let command = UserDefaults.standard.string(forKey: Key.previousCommand),
+        guard let command = PulseDefaults.shared.string(forKey: Key.previousCommand),
               !command.isEmpty
         else { return nil }
 
@@ -159,7 +159,7 @@ enum StatusLineHook {
         if let previous = settings["statusLine"] as? [String: Any],
            let command = previous["command"] as? String,
            !command.contains(modeArgument) {
-            UserDefaults.standard.set(command, forKey: Key.previousCommand)
+            PulseDefaults.shared.set(command, forKey: Key.previousCommand)
         }
 
         let executable = ProcessInfo.processInfo.arguments.first.map {
@@ -178,12 +178,12 @@ enum StatusLineHook {
     static func uninstall() -> Bool {
         guard var settings = readSettings() else { return false }
 
-        if let previous = UserDefaults.standard.string(forKey: Key.previousCommand), !previous.isEmpty {
+        if let previous = PulseDefaults.shared.string(forKey: Key.previousCommand), !previous.isEmpty {
             settings["statusLine"] = ["type": "command", "command": previous]
         } else {
             settings.removeValue(forKey: "statusLine")
         }
-        UserDefaults.standard.removeObject(forKey: Key.previousCommand)
+        PulseDefaults.shared.removeObject(forKey: Key.previousCommand)
 
         return writeSettings(settings)
     }
@@ -259,7 +259,7 @@ enum StatusLineHook {
     @MainActor
     static func offerOnFirstRun(willBeUsed: Bool) {
         guard willBeUsed else { return }
-        let defaults = UserDefaults.standard
+        let defaults = PulseDefaults.shared
         guard !defaults.bool(forKey: Key.offered) else { return }
 
         // Nothing to offer someone who doesn't have Claude Code.

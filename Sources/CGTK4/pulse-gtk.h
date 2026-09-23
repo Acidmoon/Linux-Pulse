@@ -97,17 +97,49 @@ static inline void pulse_window_present(GtkWidget* window) {
 
 /* A window that never takes focus: the panel is decoration with a hover, and a
  * click on a ring must not raise it over the window the reader was working in.
- * `gtk_window_set_focusable` also keeps the compositor from giving it an
- * activation on map, which is what makes the first frame appear without a
- * flicker in the focused application. */
+ * It also keeps the compositor from giving the window an activation on map,
+ * which is what makes the first frame appear without a flicker in whatever was
+ * focused.
+ *
+ * `gtk_widget_set_focusable`, not `gtk_window_set_focusable` — the latter does
+ * not exist in GTK4, and the widget property is the one that means this. */
 static inline void pulse_window_set_focusable(GtkWidget* window, int focusable) {
-    gtk_window_set_focusable(GTK_WINDOW(window), focusable ? TRUE : FALSE);
+    gtk_widget_set_focusable(window, focusable ? TRUE : FALSE);
 }
 
 // MARK: - Widgets
 
 static inline GtkWidget* pulse_drawing_area_new(void) {
     return gtk_drawing_area_new();
+}
+
+/* The draw callback, as a plain function of (context, width, height).
+ *
+ * `gtk_drawing_area_set_draw_func` takes a five-argument GTK-shaped callback
+ * whose first and last arguments are a widget and a user-data pointer the panel
+ * has no use for. Narrowing it to what is actually drawn means Swift passes a
+ * `@convention(c)` closure straight in, with no `unsafeBitCast` at the call site
+ * and no risk of getting the widget type wrong. */
+typedef void (*pulse_draw_callback)(cairo_t* context, int width, int height, void* user_data);
+
+static inline void pulse_draw_trampoline(GtkDrawingArea* area, cairo_t* context,
+                                         int width, int height, gpointer data) {
+    (void)area;
+    pulse_draw_callback callback = (pulse_draw_callback)data;
+    if (callback != NULL) callback(context, width, height, NULL);
+}
+
+static inline void pulse_drawing_area_set_draw(GtkWidget* area, pulse_draw_callback callback) {
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(area), pulse_draw_trampoline,
+                                   (gpointer)callback, NULL);
+}
+
+/* Asked for a redraw, and the surface told it is transparent. Without the
+ * second call GTK clears the drawing area to the theme's background colour
+ * before the callback runs, which on a "transparent" panel is an opaque box. */
+static inline void pulse_drawing_area_make_transparent(GtkWidget* area) {
+    gtk_widget_set_hexpand(area, TRUE);
+    gtk_widget_set_vexpand(area, TRUE);
 }
 
 static inline void pulse_widget_add_class(GtkWidget* widget, const char* name) {
@@ -130,6 +162,41 @@ static inline int pulse_application_run(GtkApplication* application) {
 
 static inline void pulse_application_quit(GtkApplication* application) {
     g_application_quit(G_APPLICATION(application));
+}
+
+// MARK: - Off-screen surfaces
+
+/* The panel's own drawing, on an image instead of a window.
+ *
+ * **This exists so the panel can be looked at without a display.** There is no
+ * screenshot tool on the machine the port was developed on, and "it opens and
+ * looks right" is the whole acceptance bar for a UI — so the rail is drawn
+ * through exactly the same code into a PNG, which can be inspected, diffed and
+ * attached to a CI run. `PulsePanel --render out.png` is that.
+ *
+ * The drawing is the same call either way: `PanelModel.draw` takes a
+ * `PanelCanvas`, and `CairoCanvas` wraps whichever Cairo context it is given. */
+static inline cairo_surface_t* pulse_image_surface_new(int width, int height) {
+    return cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+}
+
+static inline cairo_t* pulse_context_new(cairo_surface_t* surface) {
+    return cairo_create(surface);
+}
+
+/* 0 on success; Cairo's own error code otherwise, which is worth returning
+ * rather than swallowing — a render that produced no file should say why. */
+static inline int pulse_surface_write_png(cairo_surface_t* surface, const char* path) {
+    cairo_status_t status = cairo_surface_write_to_png(surface, path);
+    return (int)status;
+}
+
+static inline void pulse_surface_destroy(cairo_surface_t* surface) {
+    if (surface != NULL) cairo_surface_destroy(surface);
+}
+
+static inline void pulse_context_destroy(cairo_t* context) {
+    if (context != NULL) cairo_destroy(context);
 }
 
 // MARK: - Text
@@ -249,11 +316,17 @@ static inline const char* pulse_display_backend(void) {
 // MARK: - Monitors
 
 /* Monitor geometry in the compositor's own coordinate space, which on X11 is
- * the union of all screens and is where a window's position is measured. */
+ * the union of all screens and is where a window's position is measured.
+ *
+ * **Geometry and nothing else.** GTK4 removed `gdk_monitor_get_workarea` and
+ * `gdk_monitor_is_primary` in 4.12; there is no query for either, and inventing
+ * one from the geometry would be guessing at where a taskbar is. The rail wants
+ * the whole screen anyway — it is welded to the physical edge, not to the usable
+ * area — and "which monitor is primary" is answered by `pulse_primary_monitor`,
+ * which says what it actually does. */
 typedef struct {
     int x, y, width, height;
-    int work_x, work_y, work_width, work_height;
-    int primary;
+    int valid;
 } pulse_monitor_geometry;
 
 static inline int pulse_monitor_count(void) {
@@ -266,8 +339,18 @@ static inline int pulse_monitor_count(void) {
 /* `index` counts monitors the way GDK does, which is the order they were
  * reported — stable within a session but not meaningful across them, so the
  * panel looks for the primary and falls back to the first. */
+/* **Zero, which is a guess and is labelled as one.** GTK4 dropped
+ * `gdk_monitor_is_primary` in 4.12 and offers nothing in its place: GDK's
+ * monitor list has no primary in it. A compositor's first monitor is almost
+ * always the primary one, so that is what this answers — and the panel follows
+ * the pointer to another monitor as soon as it is dragged, which is the
+ * behaviour the answer is actually for. */
+static inline int pulse_primary_monitor(void) {
+    return pulse_monitor_count() > 0 ? 0 : -1;
+}
+
 static inline pulse_monitor_geometry pulse_monitor_at(int index) {
-    pulse_monitor_geometry out = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+    pulse_monitor_geometry out = {0, 0, 0, 0, 0};
     GdkDisplay* display = gdk_display_get_default();
     if (display == NULL) return out;
     GListModel* monitors = gdk_display_get_monitors(display);
@@ -276,14 +359,13 @@ static inline pulse_monitor_geometry pulse_monitor_at(int index) {
     GdkMonitor* monitor = GDK_MONITOR(g_list_model_get_item(monitors, index));
     if (monitor == NULL) return out;
 
-    GdkRectangle geometry, workarea;
+    GdkRectangle geometry;
     gdk_monitor_get_geometry(monitor, &geometry);
-    gdk_monitor_get_workarea(monitor, &workarea);
-    out.x = geometry.x; out.y = geometry.y;
-    out.width = geometry.width; out.height = geometry.height;
-    out.work_x = workarea.x; out.work_y = workarea.y;
-    out.work_width = workarea.width; out.work_height = workarea.height;
-    out.primary = gdk_monitor_is_primary(monitor) ? 1 : 0;
+    out.x = geometry.x;
+    out.y = geometry.y;
+    out.width = geometry.width;
+    out.height = geometry.height;
+    out.valid = gdk_monitor_is_valid(monitor) ? 1 : 0;
     g_object_unref(monitor);
     return out;
 }

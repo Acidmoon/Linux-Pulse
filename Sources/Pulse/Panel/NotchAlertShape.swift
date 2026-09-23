@@ -1,11 +1,13 @@
-// The macOS UI. Excluded from the Linux build rather than ported: this file
-// is SwiftUI/AppKit presentation, and the Linux panel is drawn by a separate
-// GTK4 process (see Docs/linux/migration-assessment.md). The guard is the
-// module the file actually imports, so a file that only needs SwiftUI is not
-// asking for AppKit.
-// pulse-linux: excluded
+// Upstream's own code. Enabled on Linux: a `Shape` is a function from a
+// rectangle to a path, and the `Path` it returns is supplied by
+// `Panel/GTK/PanelPath.swift`. See that file for the measurement that made this
+// worth doing.
+// pulse-linux: reused
+
 #if canImport(SwiftUI)
 import SwiftUI
+#endif
+import Foundation
 
 /// The collapsed alert cue for a top-docked rail whose ordinary sliver is
 /// replaced by the Mac's camera housing. It sits immediately under the
@@ -27,4 +29,3 @@ struct NotchAlertShape: Shape {
         return Path(roundedRect: indicator, cornerRadius: height / 2)
     }
 }
-#endif

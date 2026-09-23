@@ -75,7 +75,7 @@ enum LoginItem {
     /// here or in System Settings — has to stick, so "on by default" can only
     /// ever be a decision taken once.
     static func applyDefaultOnFirstRun() {
-        let defaults = UserDefaults.standard
+        let defaults = PulseDefaults.shared
         guard !defaults.bool(forKey: Key.decided) else { return }
         defaults.set(true, forKey: Key.decided)
         setEnabled(true)

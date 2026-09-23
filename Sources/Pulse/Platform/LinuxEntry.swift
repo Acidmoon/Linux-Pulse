@@ -25,14 +25,14 @@ import Foundation
 /// - `--json` runs **before** `LegacyDefaults.migrateIfNeeded()` on purpose:
 ///   something that runs every couple of seconds must not be the thing that
 ///   decides an installation's defaults.
-@main
 enum PulseLinuxMain {
     /// `async` for `--refresh` alone, which has to await a pass. It cannot
     /// block on one instead: `UsageStore` is main-actor bound, so a semaphore
     /// held on this thread would stop the very work it was waiting for. The
     /// other modes are synchronous and run before the first suspension, so
     /// nothing about the status line's path changed.
-    static func main() async {
+    @MainActor
+    static func run() async -> Int32 {
         // Before anything can write to a child. A helper exiting closes its
         // end of a pipe, and the write Pulse does next would kill it — macOS
         // does this in `AppDelegate`, which is not built here.
@@ -40,27 +40,27 @@ enum PulseLinuxMain {
 
         if CommandLine.arguments.contains(StatusLineHook.modeArgument) {
             StatusLineHook.runAsStatusLine()
-            exit(0)
+            return 0
         }
 
         if CommandLine.arguments.contains("--install-statusline") {
             print(StatusLineHook.install() ? "installed" : "failed")
-            exit(0)
+            return StatusLineHook.install() ? 0 : 1
         }
 
         if CommandLine.arguments.contains("--uninstall-statusline") {
             print(StatusLineHook.uninstall() ? "uninstalled" : "failed")
-            exit(0)
+            return StatusLineHook.uninstall() ? 0 : 1
         }
 
         if CommandLine.arguments.contains(UsageReport.modeArgument) {
-            exit(UsageReport.run())
+            return UsageReport.run()
         }
 
         // After `--json`, because the two are usually run together and the one
         // that reads should not have to wait behind the one that fetches.
         if CommandLine.arguments.contains(UsageRefresh.modeArgument) {
-            exit(await UsageRefresh.run())
+            return await UsageRefresh.run()
         }
 
         // Before `LegacyDefaults.migrateIfNeeded()`, like the others: these are
@@ -68,23 +68,62 @@ enum PulseLinuxMain {
         // an installation's defaults on the way past.
         for argument in [KeyCommand.setArgument, KeyCommand.clearArgument]
         where CommandLine.arguments.contains(argument) {
-            exit(KeyCommand.run(argument: argument))
+            return KeyCommand.run(argument: argument)
         }
 
         LegacyDefaults.migrateIfNeeded()
 
-        // No panel to open yet, so say so rather than exiting silently. A
-        // command that starts nothing and reports nothing reads as broken.
+        // Launched with no arguments, which is what a person does after
+        // installing — so this is where the panel belongs. It is a separate
+        // binary, and this **replaces the process rather than waiting on a
+        // child**: `pulse` in a terminal should put the rail on screen and
+        // return the prompt, exactly as the Mac app does when it is opened.
+        //
+        // Not found means the panel was not built — a machine with no GTK4, or
+        // a headless install — and that is not an error worth a stack of
+        // output. It falls through to the usage text, which names it.
+        if let panel = Self.siblingPanel(), launch(panel) {
+            return 0
+        }
+
         FileHandle.standardError.write(Data(usage.utf8))
-        exit(2)
+        return 2
+    }
+
+    /// The panel executable beside this one, if it was built.
+    ///
+    /// Beside, not on `PATH`: the two are installed together by
+    /// `Scripts/install.sh`, and finding a *different* Pulse on `PATH` would be
+    /// worse than finding none.
+    private static func siblingPanel() -> String? {
+        let selfPath = CommandLine.arguments.first ?? ""
+        let directory = (selfPath as NSString).deletingLastPathComponent
+        guard !directory.isEmpty else { return nil }
+        let candidate = (directory as NSString).appendingPathComponent("PulsePanel")
+        return FileManager.default.isExecutableFile(atPath: candidate) ? candidate : nil
+    }
+
+    /// `execv`, so the panel inherits this terminal and this process becomes
+    /// it. Returns false when the kernel refuses, in which case the caller says
+    /// so rather than leaving nothing on screen.
+    private static func launch(_ path: String) -> Bool {
+        #if canImport(Glibc)
+        var arguments: [UnsafeMutablePointer<CChar>?] = [strdup(path), nil]
+        defer { arguments.forEach { free($0) } }
+        execv(path, &arguments)
+        return false
+        #else
+        return false
+        #endif
     }
 
     private static var usage: String {
         """
         Pulse — usage monitor for the AI coding tools you already have.
 
-        The Linux floating panel is not built yet; this binary is the headless
-        core it will read from. Available now:
+        Run with no arguments to open the floating panel, where one is
+        installed. It is a separate binary — this one links no GUI libraries at
+        all, so everything below works over ssh and in a container. Available:
 
           --json                 print the last readings, one account each
           --refresh              ask every enabled provider once, then exit
