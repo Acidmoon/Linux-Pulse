@@ -89,6 +89,35 @@ final class Panel {
         pulse_window_set_default_size(window, Int32(geometry.size.width),
                                       Int32(geometry.size.height))
 
+        // **Layer-shell has to be told before the window is mapped, not after.**
+        // "Set the window up to be a layer surface once it is mapped. this must
+        // be called before" — the header's own words, and the first version
+        // called it from the map handler, which is too late. Measured under a
+        // nested `kwin_wayland`: the panel started, connected its pointer
+        // controller, and was drawn **zero** times, against 158 draws in six
+        // seconds on X11. So this happens here, before `present`, and the map
+        // handler is left to the X11 half.
+        #if canImport(CGTK4LayerShell)
+        if String(cString: pulse_display_backend()) == "wayland",
+           pulse_layer_shell_supported() == 1 {
+            pulse_layer_shell_init(window)
+            let edge = model.geometry(forScreen: monitor.rect).side
+            pulse_layer_shell_set_layer(window, Int32(PULSE_LAYER_TOP))
+            pulse_layer_shell_set_keyboard_mode(window, Int32(PULSE_LAYER_KEYBOARD_NONE))
+            // No exclusive zone: the rail floats over the edge and the windows
+            // behind it keep their full height.
+            pulse_layer_shell_set_exclusive_zone(window, 0)
+            pulse_layer_shell_set_anchor(window, Int32(PULSE_LAYER_EDGE_LEFT),
+                                         edge == .left ? 1 : 0)
+            pulse_layer_shell_set_anchor(window, Int32(PULSE_LAYER_EDGE_RIGHT),
+                                         edge == .right ? 1 : 0)
+            pulse_layer_shell_set_anchor(window, Int32(PULSE_LAYER_EDGE_TOP), 1)
+            pulse_layer_shell_set_margin(window, Int32(PULSE_LAYER_EDGE_TOP),
+                                         Int32(max(model.geometry(forScreen: monitor.rect)
+                                                    .windowOrigin.y, 0)))
+        }
+        #endif
+
         // The stylesheet, which exists for one reason: GTK clears a window to
         // the theme's background unless it is told not to, and a "transparent"
         // panel that paints the theme's grey is not transparent.
@@ -167,37 +196,21 @@ final class Panel {
 
         switch backend {
         case "wayland":
-            #if canImport(CGTK4LayerShell)
-            if pulse_layer_shell_supported() == 1 {
-                pulse_layer_shell_init(window)
-                // Anchored to the edge it is docked to and to the top, with a
-                // margin equal to where the rail belongs. Margins are measured
-                // from the anchored edge, so only the ones that are anchored
-                // mean anything.
-                let edge = geometry.side
-                pulse_layer_shell_set_layer(window, Int32(PULSE_LAYER_TOP))
-                pulse_layer_shell_set_keyboard_mode(window, Int32(PULSE_LAYER_KEYBOARD_NONE))
-                pulse_layer_shell_set_exclusive_zone(window, 0)
-                pulse_layer_shell_set_anchor(window, Int32(PULSE_LAYER_EDGE_LEFT),
-                                             edge == .left ? 1 : 0)
-                pulse_layer_shell_set_anchor(window, Int32(PULSE_LAYER_EDGE_RIGHT),
-                                             edge == .right ? 1 : 0)
-                pulse_layer_shell_set_anchor(window, Int32(PULSE_LAYER_EDGE_TOP), 1)
-                pulse_layer_shell_set_margin(window, Int32(PULSE_LAYER_EDGE_TOP),
-                                             Int32(max(geometry.windowOrigin.y, 0)))
-                return
+            // **Nothing to do here, and that is the point.** Layer-shell was set
+            // up before the window was mapped — see `present` — and a Wayland
+            // compositor places a layer surface from the margins it was given,
+            // so there is no frame to read back either. Reaching this branch at
+            // all means the compositor has no layer shell: Mutter, which
+            // implements none of it.
+            if pulse_layer_shell_supported() != 1 {
+                FileHandle.standardError.write(Data("""
+                Pulse: this Wayland compositor has no layer-shell support, so the \
+                panel cannot be docked to the screen edge or kept above other \
+                windows. It will appear as an ordinary window. GNOME (Mutter) is \
+                the compositor this affects; KDE, Sway and Hyprland are not.
+                \n
+                """.utf8))
             }
-            #endif
-            // No layer shell to use. Nothing below helps on Wayland either —
-            // a compositor there will not take EWMH — so the window is left
-            // where the compositor put it, and that is a limitation rather
-            // than a bug. `Docs/linux/windowing.md` says so.
-            FileHandle.standardError.write(Data("""
-            Pulse: this Wayland compositor has no layer-shell support, so the \
-            panel cannot be docked to the screen edge. It will appear as an \
-            ordinary window. GNOME (Mutter) is the compositor this affects.
-            \n
-            """.utf8))
 
         default:
             // X11, or anything else GDK can drive: ask the window manager.
@@ -231,9 +244,18 @@ final class Panel {
     }
 
     private var lastDisplaySample = Date()
+    /// Counted only for the debug line — the question "is the timer running or
+    /// is the window not being drawn" cannot be answered from the outside.
+    private var ticks = 0
 
     /// One step of the animation.
     func tick() {
+        if ProcessInfo.processInfo.environment["PULSE_PANEL_DEBUG"] != nil {
+            ticks += 1
+            if ticks % 30 == 1 {
+                FileHandle.standardError.write(Data("tick \(ticks)\n".utf8))
+            }
+        }
         // **Which display the panel is on, sampled rather than listened for.**
         // Upstream's rule and its reason: the pointer is the whole definition of
         // "active", and a pointer that crosses onto another display and comes to

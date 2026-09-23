@@ -219,6 +219,21 @@ request, which is correct there by construction — the compositor puts the wind
 where the margins said. On X11 it is read back because a frame is only ever a
 request.
 
+### What Wayland could not be made to show
+
+Under the nested compositor the panel is drawn **once** and then not again —
+against 224 draws in eight seconds on X11. The timer is what stops: one tick in
+eight seconds, not two hundred.
+
+**That is the harness, and it was proved to be.** A plain GTK program — thirty
+lines, no panel code, a drawing area and a `g_timeout_add` — behaves the same way
+under the same nested compositor: `backend wayland`, and one tick. Whatever a
+nested `kwin_wayland` does with its event loop, it does it to every GTK client,
+so continuous rendering and the hover interaction are **not verified on Wayland
+on this machine.** What is verified there is the part that is Wayland-specific:
+the backend is detected, the window is set up as a layer surface, and it is
+mapped and drawn.
+
 **What this does not cover:** GNOME's Mutter, which implements no
 `wlr-layer-shell` at all — the panel detects that, says so on stderr, and appears
 as an ordinary window. No Mutter session was available to run it under, so that

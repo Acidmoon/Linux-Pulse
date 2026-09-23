@@ -14,6 +14,13 @@
 # has the *headers* while the shared objects come from the system, so the
 # runtime needs LD_LIBRARY_PATH for whichever libraries the system lacks.
 # `Scripts/run-panel.sh` handles that.
+#
+# **After changing this environment, rebuild with `--manifest-cache none`.**
+# The manifest decides whether the panel's targets exist at all by looking for
+# these `.pc` files, and SwiftPM caches that decision: with a stale cache,
+# `swift build --product PulsePanel` fails with "Could not find target named
+# 'PulsePanel-product'" on a machine where the panel is perfectly buildable.
+# Measured, more than once.
 
 PULSE_GTK_SYSROOT="${PULSE_GTK_SYSROOT:-$HOME/.local/share/pulse-gtk4/sysroot}"
 
