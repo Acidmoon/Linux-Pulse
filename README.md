@@ -12,6 +12,7 @@
 <p align="center">
   <a href="https://github.com/qunqin24/Pulse/releases/latest"><img src="https://img.shields.io/github/v/release/qunqin24/Pulse?color=black" alt="Latest Release"></a>
   <img src="https://img.shields.io/badge/macOS-14.0%2B%20Sonoma-333333?logo=apple" alt="macOS 14+">
+  <img src="https://img.shields.io/badge/Linux-X11%20%26%20Wayland-333333?logo=linux&logoColor=white" alt="Linux, X11 and Wayland">
   <a href="https://github.com/qunqin24/Pulse/actions/workflows/ci.yml"><img src="https://github.com/qunqin24/Pulse/actions/workflows/ci.yml/badge.svg" alt="CI Build"></a>
   <img src="https://img.shields.io/badge/Swift-6.0-F05138?logo=swift&logoColor=white" alt="Swift 6.0">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue" alt="License"></a>
@@ -22,12 +23,65 @@
 </p>
 
 <p align="center">
-  <sub><b>macOS 14 Sonoma or newer</b> · Apple Silicon & Intel Universal · <b>English</b> · <a href="README.zh-CN.md"><b>简体中文</b></a> · <a href="README.zh-Hant.md"><b>繁體中文</b></a> · <a href="README.ja.md"><b>日本語</b></a> · <a href="README.ko.md"><b>한국어</b></a></sub>
+  <sub><b>macOS 14 Sonoma or newer</b> · Apple Silicon & Intel Universal · <b>Linux</b> (X11 &amp; Wayland) · <b>English</b> · <a href="README.zh-CN.md"><b>简体中文</b></a> · <a href="README.zh-Hant.md"><b>繁體中文</b></a> · <a href="README.ja.md"><b>日本語</b></a> · <a href="README.ko.md"><b>한국어</b></a></sub>
 </p>
 
 <p align="center">
   <img src="Docs/demo.gif" width="340" alt="Pulse floating rail docked against the screen edge">
 </p>
+
+## On Linux
+
+**This is the Linux port.** It runs the same providers, the same local log
+readers and the same panel — the rail, the rings, the animated marks, the detail
+card and the numbers are upstream's code, drawn with GTK4 and Cairo instead of
+SwiftUI.
+
+```sh
+sudo apt install libsqlite3-dev libgtk-4-dev libx11-dev libgtk4-layer-shell-dev
+swift build -c release
+./.build/release/Pulse --refresh   # fetch once
+./.build/release/Pulse             # open the panel
+```
+
+`pulse --json` and `pulse --refresh` need **none** of the GTK packages — the
+command line links no GUI libraries at all, so it works over ssh and in a
+container. The panel is a separate executable.
+
+| | Linux |
+|---|---|
+| Panel | GTK4 window, Cairo drawing, 30fps |
+| Docking | EWMH on X11, `wlr-layer-shell` on Wayland |
+| Always on top, out of the task list, never focused | yes, both backends |
+| Hover to open, hover a ring for its card | yes |
+| Provider marks | the bundled SVGs, parsed and template-filled |
+| Starting at login | XDG autostart, `~/.config/autostart/pulse.desktop` |
+| Languages | the same five `.lproj` tables, `en` `zh-Hans` `zh-Hant` `ja` `ko` |
+| Auto-update | **removed** — use your package manager, or a release |
+
+**Known differences from the macOS build.** Upstream's own README above describes
+the app as a whole and is accurate here. These are the parts that are not:
+
+- **Following the pointer between displays works on X11 only.** Wayland has no
+  global pointer query by design, so there the panel stays on the display it was
+  put on.
+- **No global shortcut.** Upstream registers one through `EventTap`; the
+  portable Linux equivalent does not exist, and half of one was not worth
+  having. The panel is started by clicking it, or by `pulse`.
+- **No tray icon.** GTK4 has no tray API; an icon means a StatusNotifierItem over
+  D-Bus, which is a component rather than a binding.
+- **No glass.** Flat black is Pulse's default surface on both platforms and the
+  only one here; there is no Linux equivalent of `glassEffect`.
+- **GNOME on Wayland** does not implement `wlr-layer-shell`, so the panel cannot
+  dock there. It says so on stderr and appears as an ordinary window. GNOME on
+  X11 is unaffected.
+
+[Docs/linux/migration-report.md](Docs/linux/migration-report.md) has the
+architecture, a table of every macOS mechanism and what became of it, and the
+measurements behind each of the differences above.
+[Docs/linux/install.md](Docs/linux/install.md) has the build and the backends.
+
+---
 
 Pulse is an unobtrusive floating monitor that docks neatly along the edge of your screen. It shows remaining allowance from the figures each service reports — using that product's own client routes, not a Pulse server — signed in as you already are, with nothing reported back. Every percentage on screen is a figure the service itself reported.
 
