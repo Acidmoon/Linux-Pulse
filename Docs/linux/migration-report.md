@@ -129,6 +129,15 @@ it. The tray below is the intended replacement.
 D-Bus, which is a component rather than a binding. The panel itself is the
 surface, and `pulse` with no arguments starts it.
 
+**What the tray would have held is on the panel.** Upstream's menu bar carried
+Settings and Quit, and a reader who started the panel on Linux had no way to stop
+it short of killing the process — which is not a way to treat somebody's
+application. Right-clicking the panel opens "Refresh now" and "Quit Pulse", and
+left-clicking a ring refreshes that provider (`onRefresh`, wired to the same
+`UsageStore.refresh(_:)`). What is still missing is *hiding* the panel: without a
+tray or a global shortcut there would be no way to bring it back, so it is not
+offered.
+
 **Glass is not implemented.** `PanelSurface` offers flat black or Liquid Glass,
 and flat black is the default on both platforms. There is no Linux equivalent of
 `glassEffect`, and a blur would need a compositor-specific protocol.

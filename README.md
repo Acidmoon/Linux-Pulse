@@ -69,7 +69,9 @@ the app as a whole and is accurate here. These are the parts that are not:
   portable Linux equivalent does not exist, and half of one was not worth
   having. The panel is started by clicking it, or by `pulse`.
 - **No tray icon.** GTK4 has no tray API; an icon means a StatusNotifierItem over
-  D-Bus, which is a component rather than a binding.
+  D-Bus, which is a component rather than a binding. **Right-click the panel
+  instead** for "Refresh now" and "Quit Pulse" — and left-click a ring to
+  refresh that provider.
 - **No glass.** Flat black is Pulse's default surface on both platforms and the
   only one here; there is no Linux equivalent of `glassEffect`.
 - **GNOME on Wayland** does not implement `wlr-layer-shell`, so the panel cannot
