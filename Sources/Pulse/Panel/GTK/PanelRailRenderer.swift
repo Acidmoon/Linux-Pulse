@@ -33,6 +33,17 @@ enum PanelRailRenderer {
     private static let logoWithoutReading: Double = 0.35
     /// The track behind every arc, at this much of the primary colour.
     private static let trackOpacity: Double = 0.18
+    /// The travelling mark that says a CLI is working: a white arc inside the
+    /// ring, going round once a second.
+    ///
+    /// **Inside the ring, and white.** Upstream is explicit about both: colour
+    /// on the ring itself means one thing — how much of the limit is gone — and
+    /// a white arc laid over it would cover the answer while claiming to be
+    /// about something else. And it goes round rather than sitting still, which
+    /// is the only thing on the rail that moves on its own.
+    private static let busySweep: Double = 0.22
+    private static let busyPeriod: Double = 1.0
+
     /// The clock arc, measured out from the ring's outer edge.
     private static let clockGap: Double = 3
     private static let clockLineWidth: Double = 2
@@ -94,8 +105,13 @@ enum PanelRailRenderer {
 
         for (index, entry) in entries.enumerated() {
             let centre = ringCentre(index, in: rail, edge: edge, docked: model.isDocked)
-            drawRing(entry, index: index, model: model, centre: centre,
-                     opacity: ringsOpacity, canvas: canvas)
+            drawRing(entry, centre: centre, opacity: ringsOpacity,
+                     isSelected: model.selectedSlot == entry.id,
+                     animatesActivity: model.animatesActivity,
+                     axis: edge.axis,
+                     frame: model.frame(for: entry.id),
+                     config: model.configuration(for: entry.id),
+                     canvas: canvas)
         }
 
         // **The card last, so its tail laps over the rail's edge.** Upstream
@@ -117,8 +133,24 @@ enum PanelRailRenderer {
         return CGPoint(x: across, y: along)
     }
 
-    private static func drawRing(_ entry: RailEntry, index: Int, model: PanelModel,
-                                 centre: CGPoint, opacity: Double, canvas: PanelCanvas) {
+    /// One ring, with everything it needs passed in rather than read off the
+    /// model.
+    ///
+    /// **Split out so it can be driven without a store.** A ring is a function
+    /// of its entry, its centre, its opacity and whether it is the one under the
+    /// pointer — and a test that has to build a `PanelModel` (which reads the
+    /// machine's real settings) to find out whether the working mark is drawn is
+    /// a test that says different things on different machines.
+    static func drawRing(_ entry: RailEntry, centre: CGPoint, opacity: Double,
+                         isSelected: Bool, animatesActivity: Bool,
+                         axis: PanelEdge.Axis = .vertical,
+                         frame: BotMarkFrame?, config: BotMarkConfig?,
+                         canvas: PanelCanvas) {
+        // How far round the working mark has travelled. Read from the clock
+        // rather than accumulated, so a dropped frame does not slow it down —
+        // upstream gets this from Core Animation, which is the same idea.
+        let busyPhase = Date().timeIntervalSinceReferenceDate
+        let busyAnimates = animatesActivity
         let diameter = DockLayout.ringDiameter
         let lineWidth = DockLayout.ringLineWidth
         // **The ring under the pointer grows in place.** `scaleEffect(1.06)`
@@ -126,7 +158,6 @@ enum PanelRailRenderer {
         // rail does not move — it is the same centre with a larger radius, and
         // the mark inside it scales with it. The figure below does not, which is
         // why the label is drawn outside this.
-        let isSelected = model.selectedSlot == entry.id
         let scale = isSelected ? 1.06 : 1
         let radius = diameter / 2 * scale
 
@@ -217,6 +248,26 @@ enum PanelRailRenderer {
         let squeeze = entry.second == nil ? 0 : secondRingSqueeze * PanelMetrics.scale
         let centreDiameter = max(diameter - (lineWidth + centreGap) * 2 - squeeze * 2, 0)
         canvas.newSubPath()
+        // The travelling mark, which says "this one is working" and is the only
+        // thing on the rail that moves without being asked to.
+        //
+        // **Not while the animated mark is playing.** The two are one fact drawn
+        // twice, and the arc is the half that says nothing about which provider
+        // it belongs to — so the mark keeps it and the arc goes.
+        if entry.isRunning, !entry.showsBotMark, busyAnimates {
+            let busiest = entry.second == nil
+                ? max(diameter - lineWidth * 1.5 - centreGap, 0)
+                : max(centreDiameter + secondRingSqueeze * PanelMetrics.scale, 0)
+            let phase = (busyPhase.truncatingRemainder(dividingBy: busyPeriod)) / busyPeriod
+            canvas.newSubPath()
+            canvas.arc(centre: centre, radius: busiest / 2,
+                       start: -Double.pi / 2 + 2 * .pi * phase,
+                       end: -Double.pi / 2 + 2 * .pi * (phase + busySweep),
+                       clockwise: true)
+            canvas.stroke(.primary, opacity: opacity,
+                          width: max(lineWidth * 0.5, 1.5))
+        }
+
         canvas.arc(centre: centre, radius: centreDiameter / 2, start: 0, end: 2 * .pi, clockwise: true)
         canvas.fill(.black, opacity: opacity)
         canvas.restore()
@@ -230,9 +281,7 @@ enum PanelRailRenderer {
                      opacity: opacity * (known ? 1 : logoWithoutReading))
         }
 
-        if entry.showsBotMark,
-           let frame = model.frame(for: entry.id),
-           let config = model.configuration(for: entry.id) {
+        if entry.showsBotMark, let frame, let config {
             let extent = centreDiameter * botScale
             canvas.save()
             // The mark is drawn in its own box, so the canvas is moved to the
@@ -244,7 +293,9 @@ enum PanelRailRenderer {
         }
 
         // The figure, above or below the ring on a setting.
-        guard DockLayout.showsPercentages(on: model.edge.axis) else { return }
+        // Whether a ring carries a figure at all is the axis's business: down a
+        // side always, across the top only when the reader has asked for it.
+        guard DockLayout.showsPercentages(on: axis) else { return }
         let figure = entry.headline?.percentText(remaining: entry.showsRemaining)
             ?? entry.figure ?? "—"
         let figureColour: Color = spent ? .pulseExhausted : .primary

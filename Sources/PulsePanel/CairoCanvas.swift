@@ -22,6 +22,7 @@ import Pulse
 ///     the path is not empty, which is CoreGraphics' behaviour for an arc *in* a
 ///     path and is wrong for a ring stroke. `newSubPath()` is the difference,
 ///     and the rail renderer calls it.
+@MainActor
 final class CairoCanvas: PanelCanvas {
     private let context: OpaquePointer
 

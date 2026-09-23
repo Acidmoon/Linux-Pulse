@@ -15,6 +15,7 @@ import Foundation
 /// padding, the corner radius, the tail's size, the font sizes, the bar height
 /// — so the card that appears here is the size and shape of the card that
 /// appears on a Mac.
+@MainActor
 enum PanelCardRenderer {
     /// Draws the card for the selected ring, if there is one. Called after the
     /// rail so the card's tail laps over the rail's edge, as it does upstream.

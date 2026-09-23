@@ -399,6 +399,11 @@ package final class PanelModel {
 
     /// How far open the rail is, 0 to 1. Read by the renderer.
     package var railOpenness: Double { openness.value }
+
+    /// Whether the rail's own motion is drawn: the travelling mark while a CLI
+    /// works, and the refresh arc. Upstream's `animatesActivity`, which is off
+    /// for a rail that is not on screen.
+    package var animatesActivity: Bool { true }
     /// Whether the rail is open enough to draw its rings. Upstream fades them
     /// in on a delay so the berth opens first and the rings arrive into it.
     package var ringsOpacity: Double {

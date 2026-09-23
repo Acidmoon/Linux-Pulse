@@ -20,6 +20,12 @@ import Foundation
 /// the frame carries them — a shape has a fill and an opacity, a frame has a
 /// body colour and an opacity of its own — and multiplying them is the back
 /// end's business, not the renderer's. `CairoCanvas` does it in one place.
+/// **`@MainActor`, which is what it has always been in fact.** A Cairo context
+/// belongs to the draw callback that made it, and GTK calls that on the main
+/// thread — so every verb here is main-actor work. Saying so is what lets a test
+/// hold a recording canvas as ordinary mutable state instead of wrapping it in
+/// something unsafe to satisfy the compiler about a race that cannot happen.
+@MainActor
 package protocol PanelCanvas: AnyObject {
     func move(to point: CGPoint)
     func line(to point: CGPoint)

@@ -15,6 +15,7 @@ import Foundation
 /// The calls are in the same order and take the same arguments as upstream's, so
 /// the two can be read side by side. `context.fill(Path(path), with: .color(c))`
 /// is `canvas.emit(path)` then `canvas.fill(c, opacity:)`.
+@MainActor
 enum PanelRenderer {
     // MARK: - The mark
 
@@ -113,6 +114,7 @@ enum PanelRenderer {
 
 // MARK: - Paths
 
+@MainActor
 extension PanelCanvas {
     /// Emits a `CGPath`, with `transform` applied to every point.
     ///
