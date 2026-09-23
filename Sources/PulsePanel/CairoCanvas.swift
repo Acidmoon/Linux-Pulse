@@ -117,10 +117,18 @@ final class CairoCanvas: PanelCanvas {
         // "10%" grows about its own centre.
         let weight = Int32(bold ? PULSE_WEIGHT_SEMIBOLD : PULSE_WEIGHT_MEDIUM)
         let width = pulse_text_width(context, string, size, weight)
-        let ascent = pulse_text_ascent(context, string, size, weight)
-        pulse_text(context, centre.x - width / 2, centre.y + ascent / 2,
+        let height = pulse_text_height(context, string, size, weight)
+        // The layout's **top-left** goes at the current point — see
+        // `pulse_text_height` for the half-line error that came of assuming a
+        // baseline.
+        pulse_text(context, centre.x - width / 2, centre.y - height / 2,
                    string, size, colour.red, colour.green, colour.blue,
                    colour.opacity * opacity, weight)
+    }
+
+    func measure(_ string: String, size: Double, bold: Bool) -> Double {
+        pulse_text_width(context, string, size,
+                         Int32(bold ? PULSE_WEIGHT_SEMIBOLD : PULSE_WEIGHT_MEDIUM))
     }
 
     private func setSource(_ colour: Color, opacity: Double) {

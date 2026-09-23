@@ -66,5 +66,9 @@ package protocol PanelCanvas: AnyObject {
     /// centre instead of shifting sideways.
     func text(_ string: String, centre: CGPoint, size: Double, colour: Color,
               opacity: Double, bold: Bool)
+
+    /// How wide that string will be. Asked rather than estimated, because a
+    /// centred title that is guessed at drifts further off the longer it gets.
+    func measure(_ string: String, size: Double, bold: Bool) -> Double
 }
 #endif

@@ -310,10 +310,16 @@ static inline double pulse_text_width(cairo_t* cr, const char* text,
     return (double)width;
 }
 
-/* The distance from a line's top to its baseline, so a caller that knows where
- * a box's vertical centre is can put the baseline there without guessing at a
- * font metric. */
-static inline double pulse_text_ascent(cairo_t* cr, const char* text,
+/* The height of the laid-out text, which is what a caller centring it on a point
+ * needs.
+ *
+ * **`pango_cairo_show_layout` puts the layout's top-left at the current point,
+ * not its baseline.** The first version of this used the baseline — read out of
+ * `pango_layout_iter_get_baseline` — and every line on the detail card was drawn
+ * about half a line too low, which put the row titles on top of their own
+ * progress bars. A line's own pixel height is the measurement that cannot be
+ * off, because it is the box being positioned. */
+static inline double pulse_text_height(cairo_t* cr, const char* text,
                                       double size, int weight) {
     PangoLayout* layout = pango_cairo_create_layout(cr);
     PangoFontDescription* font = pango_font_description_new();
@@ -323,16 +329,12 @@ static inline double pulse_text_ascent(cairo_t* cr, const char* text,
     pango_layout_set_font_description(layout, font);
     pango_layout_set_text(layout, text, -1);
 
-    PangoLayoutIter* iter = pango_layout_get_iter(layout);
-    double ascent = 0;
-    if (iter != NULL) {
-        ascent = pango_layout_iter_get_baseline(iter) / (double)PANGO_SCALE;
-        pango_layout_iter_free(iter);
-    }
+    int width = 0, height = 0;
+    pango_layout_get_pixel_size(layout, &width, &height);
 
     pango_font_description_free(font);
     g_object_unref(layout);
-    return ascent;
+    return (double)height;
 }
 
 enum {

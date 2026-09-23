@@ -97,6 +97,15 @@ enum PanelRailRenderer {
             drawRing(entry, index: index, model: model, centre: centre,
                      opacity: ringsOpacity, canvas: canvas)
         }
+
+        // **The card last, so its tail laps over the rail's edge.** Upstream
+        // layers it the same way: the bubble is drawn with the body and the tail
+        // as one path, and the two only read as one silhouette if nothing is
+        // painted over the join.
+        if let selected = model.selectedSlot,
+           let index = entries.firstIndex(where: { $0.id == selected }) {
+            PanelCardRenderer.draw(entries[index], index: index, model: model, into: canvas)
+        }
     }
 
     /// Where a ring's centre sits, in the panel's own space. The same sum the
