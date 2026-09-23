@@ -26,6 +26,7 @@ enum RenderToPNG {
     /// part worth looking at is a sixth of the image. This is for looking at.
     static func run(path: String, size: CGSize?, monitor: CGRect,
                     railOnly: Bool = false, pointers: [CGPoint] = [],
+                    hoverRing: Int? = nil, openOnly: Bool = false,
                     seconds: Double = 3) async -> Int32 {
         let model = PanelModel()
         // Started, which reads last time's numbers off disk. Nothing is
@@ -56,6 +57,17 @@ enum RenderToPNG {
         // renders the sliver: there is no ring there yet. So a render that wants
         // to show a selected ring has to arrive the way a hand does — at the
         // edge first, then onto the ring — with a second between them.
+        // `--hover` and `--open` ask the model where the pointer has to be,
+        // rather than being handed coordinates: the sliver's target and the
+        // ring centres are arithmetic the model already owns, and a copy of it
+        // in a shell script is a copy that goes stale.
+        var pointers = pointers
+        if hoverRing != nil || openOnly {
+            let hover = model.hoverPoints
+            pointers = [hover.toOpen]
+            if let hoverRing { pointers.append(hover.toSelect(hoverRing)) }
+        }
+
         let step = 1.0 / 30
         let frames = Int(seconds / step)
         let perPointer = max(frames / max(pointers.count, 1), 1)

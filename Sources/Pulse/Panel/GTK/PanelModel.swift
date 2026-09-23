@@ -506,6 +506,26 @@ package final class PanelModel {
     /// The rail's rectangle inside the window.
     var railRect: CGRect { CGRect(origin: railOrigin, size: railSize) }
 
+    /// **Where to put a pointer to open the rail, and to pick a ring.**
+    ///
+    /// A caller that wants to render the hover states would otherwise have to
+    /// know the rail's geometry — the sliver's target is twenty points wide
+    /// against the screen edge, and the rings step down the rail by a number
+    /// that depends on how many of them there are. Every one of those numbers is
+    /// here already, and a hardcoded pair of coordinates in a test or a CI job
+    /// is a copy of them that goes stale the first time the rail changes.
+    ///
+    /// Nil when the rail is floating, where nothing is collapsed and the pointer
+    /// does not have to arrive at an edge to open it.
+    package var hoverPoints: (toOpen: CGPoint, toSelect: (Int) -> CGPoint) {
+        let strip = PanelHitArea.strip(edge: placement.edge, railSize: railSize,
+                                       railTop: railOrigin.y, railLeading: railOrigin.x)
+        return (
+            toOpen: CGPoint(x: strip.midX, y: strip.midY),
+            toSelect: { index in self.railCentre(index) }
+        )
+    }
+
     /// **The part of the window that takes input.** Everything else is
     /// transparent and must let the click through to the desktop, which is what
     /// `gdk_surface_set_input_region` is for — a 342×1080 window that answers

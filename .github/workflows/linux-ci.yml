@@ -7,10 +7,12 @@ name: Linux CI
 # for Linux cannot quietly break Linux without anyone noticing, and so that
 # "it builds on my machine" is replaced with a recorded result.
 #
-# This job is expected to be RED until the core port lands (roadmap phase 1).
-# That is the point — it enumerates what still fails rather than hiding it
-# behind `continue-on-error`. Read the failure list as the current work queue.
-# See Docs/linux/migration-assessment.md.
+# It builds and tests the whole package **including the panel**, which is the
+# reason the GTK packages are installed below. The panel's targets are only
+# defined when pkg-config can find GTK4, so this job is also what says that the
+# conditional manifest works on a clean machine rather than only here.
+#
+# See Docs/linux/migration-report.md.
 
 on:
   push:
@@ -54,6 +56,17 @@ jobs:
             pkg-config \
             zlib1g-dev
 
+      # **The panel's dependencies, installed so the panel is really built.**
+      # Without these the manifest finds no `gtk4.pc`, defines no panel targets,
+      # and the job would pass while testing none of the drawing code — which is
+      # the failure mode this step exists to avoid.
+      - name: Install panel dependencies
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-4-dev \
+            libgtk4-layer-shell-dev \
+            libx11-dev
+
       # The Ubuntu 24.04 build is used here because the runner is 24.04
       # (glibc 2.39). On a host below that — Debian 12, Deepin 25, Ubuntu
       # 22.04 — the 22.04 build is the one that works, which is what
@@ -74,6 +87,13 @@ jobs:
           swift --version
           swift --version | tee /tmp/swift-version.txt
 
+      # Says what pkg-config found, which is what decides whether the panel is
+      # in the build at all. Printed before the build so that a job which
+      # skipped the panel says so at the top rather than in a diff of the
+      # artifact list.
+      - name: Panel dependencies
+        run: source Scripts/linux/panel-env.sh
+
       # `swift build` is the first check, matching the macOS gate's ordering:
       # compile errors are the useful signal, and a test run that never
       # compiled says nothing.
@@ -90,8 +110,42 @@ jobs:
           source Scripts/linux/swift-env.sh
           swift test 2>&1 | tee /tmp/test.log
 
-      # A failure here is the normal state until phase 1 completes, so the
-      # summary says what is failing rather than leaving a bare red X.
+      # **The panel is drawn here, with no display at all.** `--render` writes
+      # the rail and the card into a PNG through the same code the window draws
+      # with, so a CI run can look at the panel's appearance rather than only at
+      # whether it compiled — and the artifact below is that picture.
+      #
+      # A render that produced nothing, or produced an image with no ink in it,
+      # is the failure this catches: both are what a drawing bug looks like from
+      # the outside, and neither is a compile error.
+      - name: Render the panel
+        if: steps.build.outcome == 'success'
+        id: render
+        run: |
+          source Scripts/linux/swift-env.sh
+          set -euo pipefail
+          mkdir -p /tmp/panel
+          # No DISPLAY: this is the headless path, and it is deliberately run
+          # that way so that a dependency on a session would fail here.
+          # `--open` puts the pointer where it opens the rail, asking the model
+          # for the coordinates rather than being handed them: the sliver's
+          # target is twenty points against the screen edge and the rings step
+          # down by a number that depends on how many there are, and a copy of
+          # that arithmetic in a shell script is a copy that goes stale.
+          ./.build/debug/PulsePanel --render /tmp/panel/rail.png --rail --open
+          ./.build/debug/PulsePanel --render /tmp/panel/panel.png --open
+          for image in /tmp/panel/*.png; do
+            size=$(stat -c%s "$image")
+            echo "$image: $size bytes"
+            # A blank PNG is around a hundred bytes; anything with the rail on
+            # it is kilobytes. The bound is loose on purpose — it is there to
+            # catch "drew nothing", not to pin a file size.
+            if [ "$size" -lt 1000 ]; then
+              echo "::error::$image is only $size bytes — the panel drew nothing"
+              exit 1
+            fi
+          done
+
       - name: Summarize
         if: always()
         run: |
@@ -102,21 +156,23 @@ jobs:
             cat /tmp/swift-version.txt 2>/dev/null || echo "(toolchain not installed)"
             echo '```'
             echo
-            if [ "${{ steps.build.outcome }}" = "success" ]; then
-              echo "- build: **pass**"
-            else
-              echo "- build: **fail** — first errors below"
+            echo "- build: **${{ steps.build.outcome }}**"
+            if [ "${{ steps.build.outcome }}" != "success" ]; then
               echo
               echo '```'
               grep -E 'error:' /tmp/build.log 2>/dev/null | head -40 || echo "(no build log)"
               echo '```'
               echo
               echo "Total errors: $(grep -cE 'error:' /tmp/build.log 2>/dev/null || echo 0)"
-              echo
-              echo "Expected red until roadmap phase 1 lands — see \`Docs/linux/migration-assessment.md\`."
             fi
-            echo
             echo "- test: **${{ steps.test.outcome }}**"
+            echo "- panel rendered: **${{ steps.render.outcome }}**"
+            if [ "${{ steps.test.outcome }}" != "success" ]; then
+              echo
+              echo '```'
+              grep -E '✘ (Suite|Test) ' /tmp/test.log 2>/dev/null | head -20 || echo "(no test log)"
+              echo '```'
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload logs
@@ -129,3 +185,15 @@ jobs:
             /tmp/test.log
           if-no-files-found: ignore
           retention-days: 14
+
+      # **The panel's appearance, as a file.** Anyone reviewing a change to the
+      # rail can open it, and a reviewer who cannot run the app can still see
+      # what moved.
+      - name: Upload the panel render
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: panel-render
+          path: /tmp/panel/*.png
+          if-no-files-found: ignore
+          retention-days: 30

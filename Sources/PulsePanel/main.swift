@@ -428,6 +428,20 @@ func parsedPointers() -> [CGPoint] {
     }
 }
 
+/// `--hover [n]`: put the pointer where it opens the rail, and optionally onto
+/// ring `n` so its card appears. `--open` is the same without a ring.
+///
+/// The coordinates come from the model rather than from the command line,
+/// because the model is where the geometry already is.
+func parsedHoverRing() -> Int? {
+    if let index = CommandLine.arguments.firstIndex(of: "--hover"),
+       index + 1 < CommandLine.arguments.count,
+       let ring = Int(CommandLine.arguments[index + 1]) {
+        return ring
+    }
+    return nil
+}
+
 // MARK: - Entry
 
 // `--render <file>` draws the panel into a PNG and exits, before GTK is
@@ -451,7 +465,9 @@ if let index = CommandLine.arguments.firstIndex(of: "--render"),
     exit(await RenderToPNG.run(path: path, size: size,
                                monitor: CGRect(x: 0, y: 0, width: 1920, height: 1080),
                                railOnly: CommandLine.arguments.contains("--rail"),
-                               pointers: parsedPointers()))
+                               pointers: parsedPointers(),
+                               hoverRing: parsedHoverRing(),
+                               openOnly: CommandLine.arguments.contains("--open")))
 }
 
 pulse_init()
