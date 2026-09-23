@@ -97,6 +97,9 @@ jobs:
       # in the build at all. Printed before the build so that a job which
       # skipped the panel says so at the top rather than in a diff of the
       # artifact list.
+      # Informational. GTK4 and X11 are required for the panel to exist at all;
+      # gtk4-layer-shell is not, and Ubuntu does not package it — the script
+      # says which is which rather than failing on the optional one.
       - name: Panel dependencies
         run: source Scripts/linux/panel-env.sh
 
