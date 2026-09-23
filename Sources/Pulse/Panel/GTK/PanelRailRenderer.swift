@@ -94,7 +94,10 @@ enum PanelRailRenderer {
         canvas.translate(x: berthRect.minX, y: berthRect.minY)
         let berth = DockBerthShape(edge: edge, isDocked: model.isDocked, openness: openness)
         canvas.emit(berth.path(in: CGRect(origin: .zero, size: current)).cgPath)
-        canvas.fill(.black, opacity: 1)
+        // **Black, or the colour of the worst limit while the rail is shut.**
+        // Upstream's `PanelSurface(tint: isExpanded ? nil : alert)`: a shut rail
+        // is a sliver against the edge with no other way to say anything.
+        canvas.fill(openness < 0.5 ? (model.alertTint ?? .black) : .black, opacity: 1)
         canvas.restore()
 
         // **The rings arrive into the opening berth.** Upstream fades them in

@@ -539,6 +539,28 @@ package final class PanelModel {
         )
     }
 
+    /// The colour the collapsed sliver takes when a limit is close, or nil for
+    /// black.
+    ///
+    /// **Only the sliver carries it.** Expanded, the rings already say which
+    /// limit is where, and a coloured rail beside them would be the same fact
+    /// told twice. Collapsed, the rail is six points against the screen edge and
+    /// has no room to say anything else — so it says this, or it says nothing.
+    ///
+    /// `dockShowsAlertColor` off means never, upstream's reason being worth
+    /// keeping: some rails stay past the threshold for as long as they are
+    /// watched, and a permanently coloured line welded to the screen edge is
+    /// worse than the thing it is warning about.
+    package var alertTint: Color? {
+        guard settings.dockShowsAlertColor else { return nil }
+        guard let worst = entries.compactMap(\.headline)
+            .max(by: { $0.usedFraction < $1.usedFraction }) else { return nil }
+        let threshold = settings.warningThreshold.fraction
+        guard worst.isExhausted || worst.usedFraction >= threshold else { return nil }
+        return UsageTint.color(for: worst.usedFraction, isExhausted: worst.isExhausted,
+                               warningAt: threshold)
+    }
+
     /// **The part of the window that takes input.** Everything else is
     /// transparent and must let the click through to the desktop, which is what
     /// `gdk_surface_set_input_region` is for — a 342×1080 window that answers
