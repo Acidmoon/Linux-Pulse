@@ -191,6 +191,41 @@ rectangle put the silhouette in the panel's top-left corner.
 **`kiro.svg` draws outside its own viewBox** (y = -2.2 and y = 25.5 in a 24-unit
 box), which is what an SVG viewport clips — so the renderer clips too.
 
+## Both backends, on one machine
+
+The two sessions were run against the same binary on the same day. X11 is this
+machine's own session (KWin); Wayland is a **nested** `kwin_wayland`, started
+with `--socket wayland-pulse-test` inside it, which is a real wlr-layer-shell
+compositor rather than a stub.
+
+| | Wayland (nested KWin) | X11 (KWin) |
+|---|---|---|
+| `pulse_display_backend()` | `wayland` | `x11` |
+| `gtk_layer_is_supported()` | **true** | **false** |
+| `gdk_display_is_composited()` | true | true |
+| monitors | 1 | 1 |
+| docking path taken | layer-shell | EWMH |
+| window geometry read back | not available | 342×1080 at (1578, 0) |
+
+Two things follow. The branch is real: on Wayland the panel anchors to an edge
+through the layer shell and declines the keyboard, and on X11 it asks the window
+manager in EWMH terms — the same binary, decided at runtime by
+`gtk_layer_is_supported()` rather than by a build flag.
+
+And on Wayland the frame is **not read back**, because there is nothing to read
+it back from: `XGetGeometry` is X11's, and a layer-shell surface is placed by the
+compositor from the margins it was given. `railOrigin` stays as computed from the
+request, which is correct there by construction — the compositor puts the window
+where the margins said. On X11 it is read back because a frame is only ever a
+request.
+
+**What this does not cover:** GNOME's Mutter, which implements no
+`wlr-layer-shell` at all — the panel detects that, says so on stderr, and appears
+as an ordinary window. No Mutter session was available to run it under, so that
+path is written and reasoned about but not exercised. And the nested compositor
+is a test harness: it has one synthetic output, so multi-display behaviour on
+Wayland is untested for the same reason it is on X11.
+
 ## Verification
 
 - **852 tests in 91 suites**, all passing, with and without the GTK4 paths on
@@ -208,3 +243,10 @@ box), which is what an SVG viewport clips — so the renderer clips too.
 - The window is verified from outside the process: `xdotool` reports 342×1080 at
   (1578, 0) on a 1920-wide screen — flush with the edge — and `xprop` shows
   `_NET_WM_STATE_ABOVE`, `SKIP_TASKBAR` and `SKIP_PAGER` all set.
+- **The hover interaction is driven by a real pointer**, not by the render path's
+  direct call: `GtkEventControllerMotion` on the drawing area, and `xdotool`
+  pushing the pointer into the sliver to open the rail and onto a ring to select
+  it. Worth doing because a hover that does nothing looks exactly like a pointer
+  that never arrived — and `xdotool mousemove` on this machine does **not** place
+  the pointer where it is told (asked for (1918, 540), landed at (1854, 421)), so
+  the sweep that worked used relative moves.

@@ -153,6 +153,18 @@ final class Panel {
         let monitor = currentMonitor()
         let geometry = model.geometry(forScreen: monitor.rect)
         let _ = area
+        if ProcessInfo.processInfo.environment["PULSE_PANEL_DEBUG"] != nil {
+            #if canImport(CGTK4LayerShell)
+            let layerShell = pulse_layer_shell_supported() == 1
+            #else
+            let layerShell = false
+            #endif
+            FileHandle.standardError.write(Data(
+                ("backend \(backend), layer-shell supported \(layerShell), "
+                 + "composited \(pulse_display_has_alpha() == 1), "
+                 + "monitors \(pulse_monitor_count())\n").utf8))
+        }
+
         switch backend {
         case "wayland":
             #if canImport(CGTK4LayerShell)
