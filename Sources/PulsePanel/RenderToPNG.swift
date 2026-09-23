@@ -25,7 +25,8 @@ enum RenderToPNG {
     /// beside it — so a render of the whole thing is mostly empty space, and the
     /// part worth looking at is a sixth of the image. This is for looking at.
     static func run(path: String, size: CGSize?, monitor: CGRect,
-                    railOnly: Bool = false, seconds: Double = 3) async -> Int32 {
+                    railOnly: Bool = false, pointers: [CGPoint] = [],
+                    seconds: Double = 3) async -> Int32 {
         let model = PanelModel()
         // Started, which reads last time's numbers off disk. Nothing is
         // *fetched* — the pass `start()` kicks off will fail without a network
@@ -48,8 +49,22 @@ enum RenderToPNG {
         // than the first one before the springs have settled.
         model.geometry(forScreen: monitor)
         let start = Date(timeIntervalSinceReferenceDate: 700_000_000)
+        // **Pointers, in order, so the hover states can be seen without a
+        // mouse.** The rail is collapsed until something is under the pointer,
+        // and *only the sliver's own target counts while it is collapsed* —
+        // upstream's rule, and the reason a single pointer placed on a ring
+        // renders the sliver: there is no ring there yet. So a render that wants
+        // to show a selected ring has to arrive the way a hand does — at the
+        // edge first, then onto the ring — with a second between them.
         let step = 1.0 / 30
-        for index in 0...Int(seconds / step) {
+        let frames = Int(seconds / step)
+        let perPointer = max(frames / max(pointers.count, 1), 1)
+        var applied = 0
+        for index in 0...frames {
+            if applied < pointers.count, index >= applied * perPointer {
+                model.setPointer(pointers[applied])
+                applied += 1
+            }
             model.advance(to: start.addingTimeInterval(Double(index) * step))
         }
 

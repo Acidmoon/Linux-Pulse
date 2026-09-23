@@ -156,6 +156,46 @@ static inline void pulse_drawing_area_set_draw(GtkWidget* area,
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(area), callback, user_data, NULL);
 }
 
+/* Pointer motion and leaving, as an event controller.
+ *
+ * The controller is returned rather than the signals being connected here,
+ * because **a `static inline` function's address is not a usable C callback** —
+ * the lesson from the draw function, which linked and never fired. Swift has the
+ * two callbacks already and connects them with `pulse_connect` below, the same
+ * way the application's own `activate` signal is connected. */
+/* `void*` rather than `GtkEventController*`, because **the GTK event-controller
+ * structs are incomplete** — the typedef exists in the header and the body is
+ * private to GTK, so clang's importer has no name to give Swift and the type is
+ * simply not there. The pointer is only ever handed back to `pulse_connect`. */
+static inline void* pulse_pointer_controller(GtkWidget* widget) {
+    GtkEventController* controller = gtk_event_controller_motion_new();
+    gtk_widget_add_controller(widget, controller);
+    return controller;
+}
+
+/* One signal, connected to a Swift function. The callback is cast on the Swift
+ * side, where the signature is known. */
+static inline unsigned long pulse_connect(void* controller, const char* signal,
+                                          GCallback callback, void* data) {
+    return g_signal_connect_data((GObject*)controller, signal, callback, (gpointer)data,
+                                 NULL, (GConnectFlags)0);
+}
+
+/* **The window only takes input where it draws.** A transparent panel is still a
+ * 342×1080 window, and without this every click on the desktop behind it lands
+ * on the panel instead — the whole point of it being transparent is that the
+ * desktop is still there. `gdk_surface_set_input_region` is the Wayland *and*
+ * X11 answer, unlike everything else about this window. */
+static inline void pulse_window_set_input_region(GtkWidget* window, int x, int y,
+                                                 int width, int height) {
+    GdkSurface* surface = gtk_native_get_surface(gtk_widget_get_native(window));
+    if (surface == NULL) return;
+    cairo_rectangle_int_t rectangle = {x, y, width, height};
+    cairo_region_t* region = cairo_region_create_rectangle(&rectangle);
+    gdk_surface_set_input_region(surface, region);
+    cairo_region_destroy(region);
+}
+
 /* Asked for a redraw, and the surface told it is transparent. Without the
  * second call GTK clears the drawing area to the theme's background colour
  * before the callback runs, which on a "transparent" panel is an opaque box. */

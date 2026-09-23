@@ -106,8 +106,18 @@ final class Panel {
         pulse_widget_set_size_request(area, Int32(geometry.size.width),
                                       Int32(geometry.size.height))
         pulse_window_set_child(window, area)
-        pulse_drawing_area_set_draw(area, Panel.drawCallback,
-                                    Unmanaged.passUnretained(self).toOpaque())
+        let panelPointer = Unmanaged.passUnretained(self).toOpaque()
+        pulse_drawing_area_set_draw(area, Panel.drawCallback, panelPointer)
+
+        // **Hover is what the panel is for.** The pointer opens the rail and
+        // picks a ring; leaving closes both. The callbacks are Swift's, cast
+        // here where the signal's signature is known — see `pulse_connect` for
+        // why they are not wrapped in C.
+        let pointer = pulse_pointer_controller(area)
+        pulse_connect(pointer, "motion",
+                      unsafeBitCast(Panel.motionCallback, to: GCallback.self), panelPointer)
+        pulse_connect(pointer, "leave",
+                      unsafeBitCast(Panel.leaveCallback, to: GCallback.self), panelPointer)
 
         // **Positioned on the map signal, not before it.** See `pulse_on_map`:
         // a move that arrives before the surface is mapped is not a request the
@@ -254,6 +264,38 @@ final class Panel {
         applyBackendHints()
     }
 
+    /// The pointer moved. `x` and `y` are in the drawing area's own space, which
+    /// is the panel's — the same space `PanelHitArea` measures in.
+    /// The first argument is GTK's controller, which is an incomplete type on
+    /// the Swift side and is not used — a raw pointer is ABI-identical and
+    /// needs no name.
+    private static let motionCallback: @convention(c) (UnsafeMutableRawPointer?,
+                                                       Double, Double,
+                                                       UnsafeMutableRawPointer?) -> Void = {
+        _, x, y, data in
+        guard let data else { return }
+        let address = Int(bitPattern: data)
+        MainActor.assumeIsolated {
+            guard let raw = UnsafeMutableRawPointer(bitPattern: address) else { return }
+            Unmanaged<Panel>.fromOpaque(raw).takeUnretainedValue()
+                .pointerMoved(to: CGPoint(x: x, y: y))
+        }
+    }
+
+    private static let leaveCallback: @convention(c) (UnsafeMutableRawPointer?,
+                                                      UnsafeMutableRawPointer?) -> Void = { _, data in
+        guard let data else { return }
+        let address = Int(bitPattern: data)
+        MainActor.assumeIsolated {
+            guard let raw = UnsafeMutableRawPointer(bitPattern: address) else { return }
+            Unmanaged<Panel>.fromOpaque(raw).takeUnretainedValue().pointerMoved(to: nil)
+        }
+    }
+
+    private func pointerMoved(to point: CGPoint?) {
+        model.setPointer(point)
+    }
+
     private static let tickCallback: @convention(c) (UnsafeMutableRawPointer?) -> Int32 = { data in
         guard let data else { return 0 }
         let panelAddress = Int(bitPattern: data)
@@ -295,6 +337,14 @@ final class Panel {
         cairo_set_operator(context, CAIRO_OPERATOR_OVER)
         canvas.restore()
 
+        // The input region follows the rail's state, so the transparent part of
+        // the window is not a place to click.
+        if let window {
+            let region = model.inputRegion
+            pulse_window_set_input_region(window, Int32(region.minX), Int32(region.minY),
+                                          Int32(region.width), Int32(region.height))
+        }
+
         model.draw(into: canvas,
                    size: CGSize(width: Double(width), height: Double(height)),
                    at: Date())
@@ -307,6 +357,21 @@ final class Panel {
 @MainActor
 enum LivePanel {
     static var current: Panel?
+}
+
+/// `--pointer "x,y;x,y"`, in the panel's own coordinates — the space the hit
+/// test measures in, which is the top-left corner of the window. A sequence,
+/// because arriving at a ring means arriving at the edge first: while the rail
+/// is collapsed only the sliver's target counts, so a lone pointer placed on a
+/// ring is a pointer on the sliver.
+func parsedPointers() -> [CGPoint] {
+    guard let index = CommandLine.arguments.firstIndex(of: "--pointer"),
+          index + 1 < CommandLine.arguments.count else { return [] }
+    return CommandLine.arguments[index + 1].split(separator: ";").compactMap { entry in
+        let parts = entry.split(separator: ",")
+        guard parts.count == 2, let x = Double(parts[0]), let y = Double(parts[1]) else { return nil }
+        return CGPoint(x: x, y: y)
+    }
 }
 
 // MARK: - Entry
@@ -331,7 +396,8 @@ if let index = CommandLine.arguments.firstIndex(of: "--render"),
     // placement measures against it; nothing is drawn outside the panel.
     exit(await RenderToPNG.run(path: path, size: size,
                                monitor: CGRect(x: 0, y: 0, width: 1920, height: 1080),
-                               railOnly: CommandLine.arguments.contains("--rail")))
+                               railOnly: CommandLine.arguments.contains("--rail"),
+                               pointers: parsedPointers()))
 }
 
 pulse_init()

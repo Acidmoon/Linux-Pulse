@@ -19,7 +19,8 @@ enum PanelRenderer {
     // MARK: - The mark
 
     static func draw(_ frame: BotMarkFrame, config: BotMarkConfig,
-                     into canvas: PanelCanvas, width: Double, height: Double) {
+                     into canvas: PanelCanvas, width: Double, height: Double,
+                     opacity: Double = 1) {
         let extent = min(width, height)
         let scale = extent / (frame.viewBoxRadius * 2)
         let origin = BotMarkFrame.viewBoxCentre - frame.viewBoxRadius
@@ -32,16 +33,17 @@ enum PanelRenderer {
         let base = CGAffineTransform(scaleX: scale, y: scale)
             .translatedBy(x: -origin, y: -origin)
 
-        paint(frame.backParticles, config: config, into: canvas, base: base)
+        paint(frame.backParticles, config: config, into: canvas, base: base, opacity: opacity)
 
         // Morph parts and humming markers sit under the character and take the
         // body's colour, as the upstream layers them.
         for shape in frame.shapes {
             canvas.emit(shape.path, transform: base)
             if let strokeWidth = shape.strokeWidth {
-                canvas.stroke(config.color, opacity: shape.opacity, width: strokeWidth * scale)
+                canvas.stroke(config.color, opacity: shape.opacity * opacity,
+                              width: strokeWidth * scale)
             } else {
-                canvas.fill(config.color, opacity: shape.opacity)
+                canvas.fill(config.color, opacity: shape.opacity * opacity)
             }
         }
 
@@ -53,7 +55,7 @@ enum PanelRenderer {
         // nonzero rule; the icons are the opposite and set it themselves, so it
         // is put back here rather than left to whichever drew last.
         canvas.setFillRule(evenOdd: false)
-        canvas.fillKeepingPath(config.color, opacity: frame.opacity)
+        canvas.fillKeepingPath(config.color, opacity: frame.opacity * opacity)
 
         // `eyeLayer.clip(to: head)`. The head path is still current from the
         // fill above, so the clip costs no second emission.
@@ -63,12 +65,12 @@ enum PanelRenderer {
             var eyeTransform = eye.transform.concatenating(combined)
             guard let path = eye.path.copy(using: &eyeTransform) else { continue }
             canvas.emit(path)
-            canvas.fill(config.eyeColor, opacity: frame.opacity)
+            canvas.fill(config.eyeColor, opacity: frame.opacity * opacity)
         }
         canvas.restore()
         canvas.newPath()
 
-        paint(frame.frontParticles, config: config, into: canvas, base: base)
+        paint(frame.frontParticles, config: config, into: canvas, base: base, opacity: opacity)
 
         if let badge = frame.badge {
             let radius = badge.radius * config.badgeScale
@@ -78,9 +80,9 @@ enum PanelRenderer {
             // Stroke first, keeping the path, then fill it — which is what
             // makes the ring read as an outline around the badge rather than
             // an outline under it.
-            canvas.stroke(config.eyeColor, opacity: frame.opacity, width: 10 * scale)
+            canvas.stroke(config.eyeColor, opacity: frame.opacity * opacity, width: 10 * scale)
             canvas.emit(CGPath(ellipseIn: rect, transform: nil), transform: combined)
-            canvas.fill(config.badgeColor, opacity: frame.opacity)
+            canvas.fill(config.badgeColor, opacity: frame.opacity * opacity)
         }
     }
 
@@ -88,21 +90,22 @@ enum PanelRenderer {
     /// drawn. A particle carries its own colour, and a ribbon carries five stops
     /// of it along the segment's own axis.
     private static func paint(_ items: [BotMarkFrame.Painted], config: BotMarkConfig,
-                              into canvas: PanelCanvas, base: CGAffineTransform) {
+                              into canvas: PanelCanvas, base: CGAffineTransform,
+                              opacity: Double) {
         for item in items {
             var transform = base
             guard let path = item.path.copy(using: &transform) else { continue }
             canvas.emit(path)
             switch item.paint {
             case .solid(let colour):
-                canvas.fill(colour, opacity: item.opacity)
+                canvas.fill(colour, opacity: item.opacity * opacity)
             case .gradient(let stops, let from, let to):
                 // The endpoints are in the frame's unit space like everything
                 // else, so they go through the same mapping the path did.
                 canvas.fillGradient(stops,
                                     from: from.applying(transform),
                                     to: to.applying(transform),
-                                    opacity: item.opacity)
+                                    opacity: item.opacity * opacity)
             }
         }
     }

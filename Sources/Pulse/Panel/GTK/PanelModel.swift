@@ -64,9 +64,20 @@ package final class PanelModel {
     private var gaze: BotMarkGaze = .ahead
 
     /// The pointer, in the panel's own top-left space, or nil when it is off.
-    private var pointer: CGPoint?
+    private(set) var pointer: CGPoint?
+    /// Whether the pointer is on something the panel is drawing — the sliver
+    /// when it is collapsed, the rail and the card's band when it is not.
+    private var isHovered = false
+    /// How far open the rail is, 0 to 1, on a spring. Upstream animates this
+    /// with `.spring(response: 0.32, dampingFraction: 0.86)`, which is this
+    /// spring's `frequency: 2π/0.32` and `damping: 0.86` — `BotMarkSpring` is
+    /// already in the module and is the same integrator the mark uses.
+    private var openness = BotMarkSpring(0)
+    /// The ring the pointer is on, if any.
+    private(set) var selectedSlot: String?
     private var isQuiet = false
     private var lastActivity = Date()
+    private var lastAdvance = Date()
     /// The minute the window clock is drawn against, and only when it is on.
     private var minute = Date()
 
@@ -198,6 +209,20 @@ package final class PanelModel {
     /// rate upstream's view chose: everything the mark plays is slow, and seven
     /// engines redrawing at the display's rate is work nobody can see.
     package func advance(to date: Date) {
+        // The rail's own animation first, so the pointer's arrival and the
+        // rings' fade are in step with the mark's.
+        let elapsed = min(max(date.timeIntervalSince(lastAdvance), 0), 0.25)
+        lastAdvance = date
+        openness.target = (isHovered || !placement.isDocked || !settings.autoCollapse) ? 1 : 0
+        // Substepped the way the mark is: a spring integrated at 30fps and at
+        // 120fps should reach the same place.
+        var remaining = elapsed
+        while remaining > 0 {
+            let step = min(BotMath.fixedStep, remaining)
+            openness.step(frequency: 2 * .pi / 0.32, damping: 0.86, delta: step)
+            remaining -= step
+        }
+
         minute = date
         if date.timeIntervalSince(lastActivity) > 20 * 60 { isQuiet = true }
         rebuildEntries(at: date)
@@ -360,10 +385,115 @@ package final class PanelModel {
         }
     }
 
+    /// How far open the rail is, 0 to 1. Read by the renderer.
+    package var railOpenness: Double { openness.value }
+    /// Whether the rail is open enough to draw its rings. Upstream fades them
+    /// in on a delay so the berth opens first and the rings arrive into it.
+    package var ringsOpacity: Double {
+        let progress = min(max(openness.value, 0), 1)
+        // The same shape as `.easeOut(duration: 0.18).delay(0.12)` behind a
+        // 0.32-second spring: nothing for the first third, then most of it.
+        let delayed = (progress - 0.3) / 0.7
+        return min(max(delayed, 0), 1)
+    }
+
     /// The pointer moved, in the panel's own top-left space. Nil when it left.
+    ///
+    /// This is where the interaction lives: entering the sliver opens the rail,
+    /// arriving on a ring selects it, and leaving the panel closes both. The
+    /// rules are upstream's — `FloatingUsagePanelView.isOverContent` and
+    /// `select(_:)` — because the difference between "the pointer is inside the
+    /// window" and "the pointer is on something" is the difference between a
+    /// panel that holds itself open over a corner of empty screen and one that
+    /// closes when it should.
     package func setPointer(_ point: CGPoint?) {
         pointer = point
-        if point != nil { lastActivity = Date(); isQuiet = false }
+        guard let point else {
+            isHovered = false
+            selectedSlot = nil
+            return
+        }
+        lastActivity = Date()
+        isQuiet = false
+        isHovered = isOverContent(point)
+        selectedSlot = selectedSlot(at: point)
+    }
+
+    /// Whether the pointer counts as being on the panel.
+    private func isOverContent(_ point: CGPoint) -> Bool {
+        let rail = railRect
+        // **Collapsed, only the sliver's own target counts.** Testing the rail's
+        // full extent would hold the panel open across sixty points of empty
+        // space it is not drawing in.
+        if openness.value < 0.5 {
+            return PanelHitArea.strip(edge: placement.edge, railSize: railSize,
+                                      railTop: railOrigin.y, railLeading: railOrigin.x)
+                .contains(point)
+        }
+        if rail.contains(point) { return true }
+        guard let selectedSlot, let index = entries.firstIndex(where: { $0.id == selectedSlot })
+        else { return false }
+        // The band the card unfolds into, full width across the panel and with
+        // the same slack the rail's own edge gets — so the gap the pointer
+        // crosses between the rail and the card is covered too.
+        let windows = max(1, entries[index].usage.windows.count)
+        let cardHeight = DetailCardLayout.height(forWindows: windows)
+        let start = railCentre(index).y - cardHeight / 2 - PanelHitArea.slack
+        return CGRect(x: 0, y: start, width: panelSize.width,
+                      height: cardHeight + PanelHitArea.slack * 2).contains(point)
+    }
+
+    /// Which ring, if any, is under the pointer. Only when the rail is open:
+    /// a collapsed rail is not showing any rings, and `PanelHitArea.slot`
+    /// measures against the open rail's geometry.
+    private func selectedSlot(at point: CGPoint) -> String? {
+        guard openness.value >= 0.5 else { return nil }
+        // Upstream's own hit test, which is also what `RailGeometryTests`
+        // checks — so the ring the pointer opens is the ring the geometry says
+        // is there, not a second opinion about where the rings are.
+        return PanelHitArea.slot(at: point, edge: placement.edge,
+                                 slots: entries.map(\.slot),
+                                 railTop: railOrigin.y, railLeading: railOrigin.x,
+                                 docked: placement.isDocked)?.id
+    }
+
+    /// The rail's rectangle inside the window.
+    var railRect: CGRect { CGRect(origin: railOrigin, size: railSize) }
+
+    /// **The part of the window that takes input.** Everything else is
+    /// transparent and must let the click through to the desktop, which is what
+    /// `gdk_surface_set_input_region` is for — a 342×1080 window that answers
+    /// every click is not a panel, it is a wall.
+    ///
+    /// Collapsed it is the sliver's target; open it is the rail plus, when a
+    /// card is showing, the band the card unfolds into — the same two rectangles
+    /// `isOverContent` tests, so what holds the panel open and what takes the
+    /// click cannot disagree.
+    package var inputRegion: CGRect {
+        let rail = railRect
+        if openness.value < 0.5 {
+            return PanelHitArea.strip(edge: placement.edge, railSize: railSize,
+                                      railTop: railOrigin.y, railLeading: railOrigin.x)
+        }
+        guard let selectedSlot,
+              let index = entries.firstIndex(where: { $0.id == selectedSlot }) else {
+            return rail
+        }
+        let windows = max(1, entries[index].usage.windows.count)
+        let height = DetailCardLayout.height(forWindows: windows)
+        let centre = railCentre(index)
+        // The rail and the card's band, joined — one bounding rectangle, since
+        // an input region is a region and a union of two is two rectangles the
+        // surface API cannot take without more machinery than this needs.
+        return rail.union(CGRect(x: 0, y: centre.y - height / 2,
+                                 width: panelSize.width, height: height))
+    }
+
+    /// Where a ring's centre is, in the panel's own space. The same sum the hit
+    /// test walks, from the renderer that draws them.
+    func railCentre(_ index: Int) -> CGPoint {
+        PanelRailRenderer.ringCentre(index, in: railRect, edge: placement.edge,
+                                     docked: placement.isDocked)
     }
 }
 #endif

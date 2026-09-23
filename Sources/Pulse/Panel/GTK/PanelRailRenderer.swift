@@ -50,6 +50,7 @@ enum PanelRailRenderer {
         // rather than being recomputed here: `PanelHitArea.rail` is the same
         // arithmetic but does not know where the window actually landed.
         let rail = CGRect(origin: model.railOrigin, size: railSize)
+        let openness = min(max(model.railOpenness, 0), 1)
 
         // The berth: upstream's silhouette, drawn in the rect the rail occupies.
         //
@@ -61,16 +62,40 @@ enum PanelRailRenderer {
         // the rail's real rect produced a silhouette at the panel's top-left
         // corner with the rings somewhere else entirely, which is what the first
         // render looked like.
+        // **The silhouette morphs rather than being swapped.** `openness` is
+        // the shape's own parameter: at 0 the flare is gone and the corner
+        // radius is the whole width, which is exactly the rounded-on-one-side
+        // sliver. That is why the collapsed and expanded states can be animated
+        // between as one object — upstream says so at length on the shape.
+        //
+        // The rect animates with it, because the shape's frame is what changes
+        // size: `isExpanded ? railSize : collapsedSize`, on the same spring.
+        let collapsed = DockLayout.collapsedSize(on: edge.axis)
+        let current = CGSize(
+            width: collapsed.width + (railSize.width - collapsed.width) * openness,
+            height: collapsed.height + (railSize.height - collapsed.height) * openness)
+        // Centred on the rail's own band, which is where the open rail sits.
+        let berthRect = CGRect(x: rail.minX + (rail.width - current.width) * (edge.isLeft ? 0 : 1),
+                               y: rail.midY - current.height / 2,
+                               width: current.width, height: current.height)
+
         canvas.save()
-        canvas.translate(x: rail.minX, y: rail.minY)
-        let berth = DockBerthShape(edge: edge, isDocked: model.isDocked, openness: 1)
-        canvas.emit(berth.path(in: CGRect(origin: .zero, size: railSize)).cgPath)
+        canvas.translate(x: berthRect.minX, y: berthRect.minY)
+        let berth = DockBerthShape(edge: edge, isDocked: model.isDocked, openness: openness)
+        canvas.emit(berth.path(in: CGRect(origin: .zero, size: current)).cgPath)
         canvas.fill(.black, opacity: 1)
         canvas.restore()
 
+        // **The rings arrive into the opening berth.** Upstream fades them in
+        // on a delay behind the spring, so the silhouette is most of the way
+        // there before anything is drawn on it.
+        let ringsOpacity = model.ringsOpacity
+        guard ringsOpacity > 0.01 else { return }
+
         for (index, entry) in entries.enumerated() {
             let centre = ringCentre(index, in: rail, edge: edge, docked: model.isDocked)
-            drawRing(entry, index: index, model: model, centre: centre, canvas: canvas)
+            drawRing(entry, index: index, model: model, centre: centre,
+                     opacity: ringsOpacity, canvas: canvas)
         }
     }
 
@@ -84,10 +109,17 @@ enum PanelRailRenderer {
     }
 
     private static func drawRing(_ entry: RailEntry, index: Int, model: PanelModel,
-                                 centre: CGPoint, canvas: PanelCanvas) {
+                                 centre: CGPoint, opacity: Double, canvas: PanelCanvas) {
         let diameter = DockLayout.ringDiameter
         let lineWidth = DockLayout.ringLineWidth
-        let radius = diameter / 2
+        // **The ring under the pointer grows in place.** `scaleEffect(1.06)`
+        // on a SwiftUI view scales about its own centre, so the ring on the
+        // rail does not move — it is the same centre with a larger radius, and
+        // the mark inside it scales with it. The figure below does not, which is
+        // why the label is drawn outside this.
+        let isSelected = model.selectedSlot == entry.id
+        let scale = isSelected ? 1.06 : 1
+        let radius = diameter / 2 * scale
 
         let spent = UsageTint.isSpent(entry.headline) || (entry.headline?.usedFraction ?? 0) >= 1
         let used = min(max(entry.headline?.usedFraction ?? 0, 0), 1)
@@ -109,9 +141,25 @@ enum PanelRailRenderer {
 
         // The track first, so every arc sits in it.
         canvas.save()
+        // **The halo, before anything else on the ring.** Upstream draws it as
+        // a shadow cast by the arc — `.shadow(color: arcColour.opacity(0.42),
+        // radius: 10)` — and Cairo has no blur, so it is approximated with
+        // three increasingly wide and faint strokes of the same colour. A real
+        // gaussian would be better and would need a filter; at 36 points across
+        // the difference is not visible.
+        if isSelected {
+            canvas.newSubPath()
+            canvas.arc(centre: centre, radius: radius, start: 0, end: 2 * .pi, clockwise: true)
+            for (width, alpha) in [(lineWidth + 4, 0.18), (lineWidth + 8, 0.10)] {
+                canvas.newSubPath()
+                canvas.arc(centre: centre, radius: radius, start: 0, end: 2 * .pi, clockwise: true)
+                canvas.stroke(colour, opacity: alpha * opacity, width: width)
+            }
+        }
+
         canvas.newSubPath()
         canvas.arc(centre: centre, radius: radius, start: 0, end: 2 * .pi, clockwise: true)
-        canvas.stroke(.primary, opacity: trackOpacity, width: lineWidth)
+        canvas.stroke(.primary, opacity: trackOpacity * opacity, width: lineWidth)
 
         // The second ring, inside the first and thinner, before the disc is
         // drawn over its middle.
@@ -126,13 +174,14 @@ enum PanelRailRenderer {
             let secondRadius = DockLayout.secondRingDiameter / 2
             canvas.newSubPath()
             canvas.arc(centre: centre, radius: secondRadius, start: 0, end: 2 * .pi, clockwise: true)
-            canvas.stroke(.primary, opacity: trackOpacity, width: DockLayout.secondRingLineWidth)
+            canvas.stroke(.primary, opacity: trackOpacity * opacity,
+                          width: DockLayout.secondRingLineWidth)
             canvas.newSubPath()
             canvas.arc(centre: centre, radius: secondRadius,
                        start: -Double.pi / 2,
                        end: -Double.pi / 2 + 2 * .pi * (secondSpent ? 1 : max(secondShown, 0)),
                        clockwise: true)
-            canvas.stroke(secondColour, opacity: 1, width: DockLayout.secondRingLineWidth)
+            canvas.stroke(secondColour, opacity: opacity, width: DockLayout.secondRingLineWidth)
         }
 
         // The reading, from twelve o'clock.
@@ -140,7 +189,8 @@ enum PanelRailRenderer {
             canvas.newSubPath()
             canvas.arc(centre: centre, radius: radius, start: -Double.pi / 2,
                        end: -Double.pi / 2 + 2 * .pi * fraction, clockwise: true)
-            canvas.stroke(colour, opacity: entry.isRefreshing ? 0.3 : 1, width: lineWidth)
+            canvas.stroke(colour, opacity: opacity * (entry.isRefreshing ? 0.3 : 1),
+                          width: lineWidth)
         }
 
         // The window clock: how much of the limit's period has run, outside the
@@ -151,7 +201,7 @@ enum PanelRailRenderer {
             canvas.newSubPath()
             canvas.arc(centre: centre, radius: clockRadius, start: -Double.pi / 2,
                        end: -Double.pi / 2 + 2 * .pi * min(max(elapsed, 0), 1), clockwise: true)
-            canvas.stroke(.primary, opacity: clockOpacity, width: clockLineWidth)
+            canvas.stroke(.primary, opacity: clockOpacity * opacity, width: clockLineWidth)
         }
 
         // The disc the mark stands on, then the mark.
@@ -159,7 +209,7 @@ enum PanelRailRenderer {
         let centreDiameter = max(diameter - (lineWidth + centreGap) * 2 - squeeze * 2, 0)
         canvas.newSubPath()
         canvas.arc(centre: centre, radius: centreDiameter / 2, start: 0, end: 2 * .pi, clockwise: true)
-        canvas.fill(.black, opacity: 1)
+        canvas.fill(.black, opacity: opacity)
         canvas.restore()
 
         // The logo, or the animated mark in its place. Upstream draws one or
@@ -168,7 +218,7 @@ enum PanelRailRenderer {
         if !entry.showsBotMark {
             drawLogo(entry.usage.provider, into: canvas, centre: centre,
                      size: centreDiameter * iconScale,
-                     opacity: known ? 1 : logoWithoutReading)
+                     opacity: opacity * (known ? 1 : logoWithoutReading))
         }
 
         if entry.showsBotMark,
@@ -180,7 +230,7 @@ enum PanelRailRenderer {
             // disc and the renderer's own viewBox mapping does the rest.
             canvas.translate(x: centre.x - extent / 2, y: centre.y - extent / 2)
             PanelRenderer.draw(frame, config: config, into: canvas,
-                               width: extent, height: extent)
+                               width: extent, height: extent, opacity: opacity)
             canvas.restore()
         }
 
@@ -189,7 +239,7 @@ enum PanelRailRenderer {
         let figure = entry.headline?.percentText(remaining: entry.showsRemaining)
             ?? entry.figure ?? "—"
         let figureColour: Color = spent ? .pulseExhausted : .primary
-        let figureOpacity = spent ? 1 : (known ? (entry.isRefreshing ? 0.3 : 1) : 0.4)
+        let figureOpacity = opacity * (spent ? 1 : (known ? (entry.isRefreshing ? 0.3 : 1) : 0.4))
         // The label's own centre, half its line height clear of the ring — the
         // same `ringToTextSpacing` the stack uses, so the figure sits where a
         // `VStack` would have put it.
