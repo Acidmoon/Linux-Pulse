@@ -64,8 +64,14 @@ jobs:
         run: |
           sudo apt-get install -y --no-install-recommends \
             libgtk-4-dev \
-            libgtk4-layer-shell-dev \
             libx11-dev
+          # **Best effort, because Ubuntu 24.04 does not package it.** The
+          # panel must build and run without layer-shell — that is what the
+          # `#if canImport(CGTK4LayerShell)` guards are for — and a job that
+          # installed it unconditionally would never exercise that path.
+          sudo apt-get install -y --no-install-recommends libgtk4-layer-shell-dev \
+            || echo "::notice::gtk4-layer-shell is not packaged for this release; building without it"
+          source Scripts/linux/panel-env.sh || true
 
       # The Ubuntu 24.04 build is used here because the runner is 24.04
       # (glibc 2.39). On a host below that — Debian 12, Deepin 25, Ubuntu

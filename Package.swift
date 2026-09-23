@@ -141,18 +141,21 @@ func pkgConfigHas(_ module: String) -> Bool {
     return searchPaths.contains { FileManager.default.fileExists(atPath: $0 + "/" + module + ".pc") }
 }
 
+// **`gtk4-layer-shell` is optional, and Ubuntu does not ship it.** Ubuntu 24.04
+// has no `libgtk4-layer-shell-dev` — measured in CI, where the install failed
+// with "Unable to locate package". So the target is defined only where the
+// library is, exactly as the panel is defined only where GTK4 is, and the
+// panel's own `#if canImport(CGTK4LayerShell)` covers the rest. Without it the
+// panel still runs and still docks on X11; on Wayland it says so and appears as
+// an ordinary window.
+let hasLayerShell = pkgConfigHas("gtk4-layer-shell-0")
+
 let panelTargets: [Target] = !pkgConfigHas("gtk4") ? [] : [
     .systemLibrary(
         name: "CGTK4",
         path: "Sources/CGTK4",
         pkgConfig: "gtk4",
         providers: [.apt(["libgtk-4-dev"])]
-    ),
-    .systemLibrary(
-        name: "CGTK4LayerShell",
-        path: "Sources/CGTK4LayerShell",
-        pkgConfig: "gtk4-layer-shell-0",
-        providers: [.apt(["libgtk4-layer-shell-dev"])]
     ),
     .systemLibrary(
         name: "CX11",
@@ -162,10 +165,17 @@ let panelTargets: [Target] = !pkgConfigHas("gtk4") ? [] : [
     ),
     .executableTarget(
         name: "PulsePanel",
-        dependencies: ["Pulse", "CGTK4", "CGTK4LayerShell", "CX11"],
+        dependencies: ["Pulse", "CGTK4", "CX11"] + (hasLayerShell ? ["CGTK4LayerShell"] : []),
         path: "Sources/PulsePanel"
     )
-]
+] + (hasLayerShell ? [
+    .systemLibrary(
+        name: "CGTK4LayerShell",
+        path: "Sources/CGTK4LayerShell",
+        pkgConfig: "gtk4-layer-shell-0",
+        providers: [.apt(["libgtk4-layer-shell-dev"])]
+    )
+] : [])
 let panelProducts: [Product] = panelTargets.isEmpty ? [] : [
     .executable(name: "PulsePanel", targets: ["PulsePanel"])
 ]
