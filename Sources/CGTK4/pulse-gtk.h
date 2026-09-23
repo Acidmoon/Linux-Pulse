@@ -24,6 +24,14 @@
 #include <gtk/gtk.h>
 #include <pango/pangocairo.h>
 
+/* `g_unix_signal_add`, which is where SIGUSR1 is arranged. It is GLib rather
+ * than GTK but it is the signal facility that goes with the main loop the panel
+ * already runs, and a hand-rolled `signal()` handler would be delivered on
+ * whichever thread the kernel picked and would have to get itself onto the main
+ * one. `glib-unix.h` also brings `signal.h` with it, so `PULSE_SIGUSR1` and
+ * `PULSE_SIGTERM` below are the only names Swift needs. */
+#include <glib-unix.h>
+
 /* The backend headers, because `GDK_IS_X11_DISPLAY` and `GDK_IS_WAYLAND_DISPLAY`
  * are macros that live in them and nowhere else — without these the two
  * spellings are implicit function declarations, which compiles and then fails to
@@ -540,4 +548,34 @@ static inline int pulse_monitor_index_at(int x, int y) {
         }
     }
     return -1;
+}
+
+// MARK: - Being told, from outside
+
+/* **How `pulse --place` moves a panel that is already running.** The alternative
+ * was to write the settings file and let the panel notice, which means watching
+ * the file — and a watcher fires on the write its own process makes, so it needs
+ * the guard that distinguishes the two, and it fires twice for one save, and it
+ * reports a whole-file change for every unrelated key. A signal says exactly one
+ * thing: read your settings again.
+ *
+ * `g_unix_signal_add` is the right one and not `signal()`: it delivers on the
+ * main loop, so the handler is on the same thread as everything it touches. A
+ * `signal()` handler runs wherever the kernel decides, and moving a window from
+ * there is a data race with the drawing. */
+#define PULSE_SIGUSR1 SIGUSR1
+#define PULSE_SIGTERM SIGTERM
+
+/* `PulseSignalHandler` is a `gboolean (*)(void*)` in GLib's spelling. It returns
+ * `G_SOURCE_CONTINUE` (nonzero) to stay installed; returning zero removes it
+ * after the first signal, which is a panel that moves once and then ignores
+ * every later request. */
+static inline unsigned int pulse_on_signal(int signum, GCallback handler, void* data) {
+    return g_unix_signal_add(signum, (GSourceFunc)handler, data);
+}
+
+/* `SIGTERM` as `pulse --quit` sends it, and as a compositor or a session manager
+ * sends it at logout. Both should take the same path out. */
+static inline int pulse_raise(int pid, int signum) {
+    return kill((pid_t)pid, signum);
 }

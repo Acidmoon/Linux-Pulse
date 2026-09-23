@@ -231,6 +231,29 @@ final class PanelPlacement {
         )
     }
 
+    /// Reads the placement again, **from the settings file itself**.
+    ///
+    /// This is how a running panel hears about `pulse --place`. `UserDefaults`
+    /// cannot be used for it and that is measured, not assumed: see
+    /// `SettingsFile` for the probe. On macOS `restored()` is already correct,
+    /// because `cfprefsd` is the cross-process thing that Linux lacks.
+    static func reloaded() -> PanelPlacement {
+        #if canImport(AppKit)
+        restored()
+        #else
+        guard let stored = SettingsFile.read() else { return restored() }
+        let dock: PanelDock = stored[Key.floating] as? Bool == true
+            ? .floating
+            : .edge((stored[Key.edge] as? String).flatMap(PanelEdge.init(rawValue:)) ?? .right)
+        return PanelPlacement(
+            dock: dock,
+            horizontalRatio: stored[Key.horizontalRatio] as? Double ?? 1,
+            verticalRatio: stored[Key.verticalRatio] as? Double ?? 0.5,
+            display: stored[Key.display] as? String
+        )
+        #endif
+    }
+
     /// Called when the placement changes by a route that hasn't already moved
     /// the window — picking a position in settings, say. `FloatingPanelController`
     /// uses it to reposition the panel.

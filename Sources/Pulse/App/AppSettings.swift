@@ -1193,6 +1193,42 @@ final class AppSettings {
         )
     }
 
+    /// Re-reads, from the settings file, the settings the command line can
+    /// change — and **only those**, because this runs on a signal and the rest
+    /// cannot have changed behind the panel's back.
+    ///
+    /// Written as field-by-field assignments through the live instance rather
+    /// than as a fresh `AppSettings`, and that is the point: `UsageStore` holds
+    /// the instance it was built with for as long as it lives, so a new one
+    /// would leave the store reading accounts out of the old and the rail
+    /// disagreeing with itself. The existing `didSet`s then do the rest, which
+    /// includes refusing to empty the rail.
+    ///
+    /// The keys and their shapes mirror `storedRail()` and `restored()` exactly;
+    /// where they differ it is a bug, so they are read the same way.
+    func adoptCommandLineSettings() {
+        #if !canImport(AppKit)
+        guard let stored = SettingsFile.read() else { return }
+
+        if let enabled = stored[ProviderSelection.enabledKey] as? [String] {
+            enabledAccounts = Set(enabled)
+        }
+        if let data = stored[Key.extraAccounts] as? Data,
+           let extras = try? JSONDecoder().decode([ExtraAccount].self, from: data) {
+            extraAccounts = extras
+        }
+        if let order = stored[Key.providerOrder] as? [String] {
+            providerOrder = order
+        }
+        if let pinned = stored[Key.pinnedWindows] as? [String: String] {
+            pinnedWindows = pinned
+        }
+        if let remaining = stored[Key.showsRemaining] as? Bool {
+            showsRemaining = remaining
+        }
+        #endif
+    }
+
     static func restored() -> AppSettings {
         let defaults = PulseDefaults.shared
 

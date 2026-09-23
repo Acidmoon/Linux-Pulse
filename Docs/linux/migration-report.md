@@ -111,6 +111,27 @@ providers, ~50 log readers, OAuth, loopback callbacks, the sealed-file store, an
 These are the places where the Linux app is **not** the macOS app. None of them
 is a bug being excused; each has a cause.
 
+**There is no Settings window, and that is the largest remaining gap.** Upstream
+puts every choice in one: which rings, the rail's edge and position, the
+language, whether a limit shows what is used or what is left. On Linux the panel
+is built but the window is not, so those settings could only be changed by
+editing `~/.config/Pulse.plist` by hand — and then killing the panel, because
+nothing re-read the file. For a program whose job is to be looked at, that was
+the answer a reader got when they asked how to move it.
+
+`--place`, `--position`, `--autostart` and `--quit` now cover the settings a
+sentence can say in a word, and `--enable`/`--disable` cover the rail. What is
+still missing is what a sentence cannot say: an ordered list of rings, a
+language picker, per-provider window pinning. `pulse --help` says so by listing
+what exists rather than by claiming a window that does not.
+
+**A running panel hears about settings through `SIGUSR1`, and it reads the file
+to do it.** Not a file watcher: a watcher fires on the panel's own writes too, so
+it needs a guard to tell them apart, and it reports a whole-file change for every
+unrelated key. `g_unix_signal_add` on the main loop is what keeps the handler on
+the thread that owns the window. The reading has to be the file rather than
+`UserDefaults`, and that is measured — see `Docs/linux/cli.md` for the probe.
+
 **Multi-display following is X11 only.** Upstream samples the pointer's display
 every quarter second, because "the pointer is the whole definition of active".
 X11 answers with `XQueryPointer`. **Wayland deliberately has no global pointer
@@ -213,6 +234,35 @@ rectangle put the silhouette in the panel's top-left corner.
 
 **`kiro.svg` draws outside its own viewBox** (y = -2.2 and y = 25.5 in a 24-unit
 box), which is what an SVG viewport clips — so the renderer clips too.
+
+**The panel controls found four, and three of them were in the controls.**
+
+- **A `UserDefaults` cannot see another process's write, so "write the settings
+  and tell the panel to re-read" did not work at all.** Measured with a probe:
+  the instance the panel held read `nil` before the write and `nil` three seconds
+  after it, and a freshly constructed instance for the same suite still read
+  `nil` — while it could see a key it had written itself. Foundation on Linux
+  keeps a process-wide registry of parsed domains. The reload reads the file.
+
+- **The settings write never reached the disk, so `--enable` was a lie** — and
+  `--set-key` had been lying the same way, because it switches on the provider
+  whose key it stores. `UserDefaults` on Linux writes to memory and reaches the
+  file on a timer or at exit; these commands *are* the process. Flushed once, at
+  `PulseCLI.run()`'s single exit.
+
+- **The autostart file named a relative path.** `Exec=./.build/debug/PulsePanel`,
+  because `CommandLine.arguments.first` is whatever was typed. The file was
+  written, the state read back as "on", and nothing would have started at login —
+  the session resolves that path against its own working directory.
+
+- **A test that asked whether `--quit` was claimed by running `--quit`.** It sent
+  `SIGTERM` to whatever pid file the machine had and killed the running panel.
+  Claiming is a predicate now (`PanelCommand.claims`), and the pid file is behind
+  the same `PULSE_DEFAULTS_SUITE` isolation as the settings.
+
+The first two were found by running the command and reading the file back, not by
+reading the code; the third by looking at what was written; the fourth by
+noticing that the panel had died for no reason it could account for.
 
 ## Both backends, on one machine
 

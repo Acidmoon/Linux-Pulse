@@ -194,6 +194,19 @@ final class Panel {
         // window manager sees, and KWin centred a panel that had asked for the
         // right-hand edge.
         pulse_on_map(window, Panel.mapCallback)
+
+        // **How a command reaches a panel that is already running.** Registered
+        // on the main loop rather than with `signal()`, so the handler is on the
+        // thread that owns the window and the engines — see `pulse_on_signal`.
+        let reloadSource = pulse_on_signal(PULSE_SIGUSR1,
+                                           unsafeBitCast(Panel.reloadCallback, to: GCallback.self), nil)
+        let termSource = pulse_on_signal(PULSE_SIGTERM,
+                                         unsafeBitCast(Panel.terminateCallback, to: GCallback.self), nil)
+        if ProcessInfo.processInfo.environment["PULSE_PANEL_DEBUG"] != nil {
+            FileHandle.standardError.write(Data(
+                ("signal sources: usr1 \(reloadSource), term \(termSource)\n").utf8))
+        }
+
         pulse_window_present(window)
 
         // The first reading, and the animation clock. `refresh` is asked once
@@ -408,6 +421,68 @@ final class Panel {
         }
     }
 
+    /// Leaves, tidily.
+    ///
+    /// **The one way out**, whichever way it was asked for — the menu item,
+    /// `pulse --quit`, a logout's `SIGTERM` — so the pid file cannot be left
+    /// behind by one of them forgetting. A stale pid file is survivable
+    /// (`PanelProcess.running` checks the pid is alive before believing it) but
+    /// leaving one that says a panel is running when it is not is the kind of
+    /// litter that gets believed.
+    static func quit() -> Never {
+        PanelProcess.release()
+        exit(0)
+    }
+
+    /// `pulse --place` and `pulse --position`, arriving as a signal.
+    ///
+    /// **`g_unix_signal_add`'s signature is `gboolean (*)(gpointer)`, and it
+    /// must answer nonzero to stay installed.** Zero means GLib uninstalls the
+    /// handler after the first signal, which is a panel that moves the first
+    /// time it is asked and ignores every request after that.
+    private static let reloadCallback: @convention(c) (UnsafeMutableRawPointer?) -> Int32 = { _ in
+        MainActor.assumeIsolated {
+            LivePanel.current?.reloadFromSettings()
+        }
+        return 1
+    }
+
+    /// `SIGTERM`: `pulse --quit`, and the session's own logout.
+    private static let terminateCallback: @convention(c) (UnsafeMutableRawPointer?) -> Int32 = { _ in
+        MainActor.assumeIsolated {
+            Panel.quit()
+        }
+    }
+
+    /// Reads the settings again and moves, without restarting.
+    ///
+    /// **The size is re-requested as well as the position, and that is not
+    /// tidiness.** A docked rail is 342×1080 on a left edge and 1920×342 on the
+    /// top one, so `--place top` on a running panel changes the panel's *shape*;
+    /// moving alone would leave a tall narrow window welded to the top edge with
+    /// the rail drawn outside it.
+    func reloadFromSettings() {
+        guard let window, let area else { return }
+        model.reloadSettings()
+        if ProcessInfo.processInfo.environment["PULSE_PANEL_DEBUG"] != nil {
+            FileHandle.standardError.write(Data(
+                ("reloading: \(model.placementSummary())\n").utf8))
+        }
+
+        let geometry = model.geometry(forScreen: currentMonitor().rect)
+        pulse_widget_set_size_request(area, Int32(geometry.size.width),
+                                      Int32(geometry.size.height))
+        pulse_window_set_default_size(window, Int32(geometry.size.width),
+                                      Int32(geometry.size.height))
+        place()
+
+        // The frame is a request again, so the rail's offsets are re-derived
+        // from the frame that really arrives rather than from the old one. Same
+        // two lines `followPointer` does after a move, for the same reason.
+        confirmAttempts = 0
+        confirmedFrame = .zero
+    }
+
     /// Moves the panel to the display the pointer is on, if it has moved.
     ///
     /// **X11 only.** A Wayland client cannot ask where the pointer is outside
@@ -511,10 +586,8 @@ final class Panel {
         let address = Int(bitPattern: data)
         MainActor.assumeIsolated {
             guard let raw = UnsafeMutableRawPointer(bitPattern: address) else { return }
-            // The panel is the application: there is nothing else to leave
-            // running, and the process is what the window manager is tracking.
             _ = Unmanaged<Panel>.fromOpaque(raw).takeUnretainedValue()
-            exit(0)
+            Panel.quit()
         }
     }
 
@@ -655,6 +728,11 @@ guard let application = pulse_application_new() else {
 let model = PanelModel()
 let panel = Panel(model: model)
 LivePanel.current = panel
+
+// **So `pulse --quit` and `pulse --place` can find this process.** Written
+// before the window exists and removed by `Panel.quit()`, whichever route out
+// was taken.
+PanelProcess.claim()
 
 /// The panel has to survive as long as the signal connection does, which is the
 /// life of the application.

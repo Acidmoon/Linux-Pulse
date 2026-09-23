@@ -47,7 +47,14 @@ enum LinuxLoginItem {
     /// for `pulse` with no arguments: the two are installed together and
     /// finding a *different* Pulse on `PATH` would be worse than finding none.
     static var panelExecutable: String? {
-        let selfPath = CommandLine.arguments.first ?? ""
+        // **Absolute, because the session that reads this file is not started
+        // from the shell that wrote it.** `CommandLine.arguments.first` is
+        // whatever was typed — `./.build/debug/Pulse` when run from a checkout —
+        // and an `Exec` line of `./.build/debug/PulsePanel` is resolved against
+        // the login session's working directory, which is not this one. The
+        // desktop file was written, the state read back as "on", and nothing
+        // would have started at login.
+        let selfPath = URL(fileURLWithPath: CommandLine.arguments.first ?? "").standardized.path
         let directory = (selfPath as NSString).deletingLastPathComponent
         let candidates = [
             directory.isEmpty ? nil : (directory as NSString).appendingPathComponent("PulsePanel"),

@@ -110,6 +110,33 @@ package final class PanelModel {
 
     // MARK: - Size and placement
 
+    /// What the placement is, for a diagnostic.  is internal to the
+    /// target and the panel is a different one.
+    package func placementSummary() -> String { "\(placement) \(panelSize)" }
+
+    /// Re-reads the settings and applies them to the objects the panel is
+    /// already using. This is the panel end of `pulse --place`.
+    ///
+    /// **The same objects, re-filled — not new ones.** `UsageStore` keeps its
+    /// `AppSettings` for as long as it lives, so handing the model a fresh
+    /// instance would leave the store reading accounts out of the old one and
+    /// the rail disagreeing with itself about which providers are on. Writing
+    /// each field through the live instance keeps one source of truth, and the
+    /// `didSet`s that already exist do the rest of the work — including
+    /// refusing to empty the rail, which is the same rule as ever.
+    ///
+    /// Only the settings a reader can change from outside are copied. The rest
+    /// — the card's metrics, the language — are read where they are used and
+    /// need no reload.
+    package func reloadSettings() {
+        settings.adoptCommandLineSettings()
+        placement = PanelPlacement.reloaded()
+        // The rail's shape follows from which accounts are on it, so it is
+        // rebuilt rather than merely redrawn — a provider switched on from the
+        // command line has no ring until this runs.
+        rebuildEntries(at: Date())
+    }
+
     /// The panel window's size, which is its maximum and not the rail's: the
     /// card unfolds into it, and a window that grew when a card opened would
     /// move the coordinate space the rail is laid out in mid-animation. Upstream

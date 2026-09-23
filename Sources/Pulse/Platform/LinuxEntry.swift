@@ -86,6 +86,11 @@ enum PulseLinuxMain {
             if let code = ProviderCommand.run(argument: argument) { return code }
         }
 
+        // The panel's own settings, and how to stop it.
+        for argument in PanelCommand.arguments where CommandLine.arguments.contains(argument) {
+            if let code = PanelCommand.run(argument: argument) { return code }
+        }
+
         // After `--json`, because the two are usually run together and the one
         // that reads should not have to wait behind the one that fetches.
         if CommandLine.arguments.contains(UsageRefresh.modeArgument) {
@@ -162,10 +167,22 @@ enum PulseLinuxMain {
           --install-statusline   register this binary as Claude Code's status line
           --uninstall-statusline undo that
 
-        \(ProviderCommand.enableArgument) <provider>    show it on the rail
-        \(ProviderCommand.disableArgument) <provider>   take it off
-        --providers            what is on the rail, and what is not
-        --help                 this
+        The rail:
+
+          \(ProviderCommand.enableArgument) <provider>    show it on the rail
+          \(ProviderCommand.disableArgument) <provider>   take it off
+          --providers            what is on the rail, and what is not
+
+        The panel itself. These take effect immediately on a panel that is
+        already running, so nothing has to be killed and restarted:
+
+          \(PanelCommand.placeArgument) <edge>        left, right, top, or float
+          \(PanelCommand.positionArgument) <0.0-1.0> where along that edge it sits,
+                                 0 at the start, 0.5 centred, 1 at the end
+          \(PanelCommand.autostartArgument) <on|off>  start it at login
+          \(PanelCommand.quitArgument)                stop it
+
+          --help                 this
 
         \(UsageRefresh.modeArgument) fills the cache and \(UsageReport.modeArgument) reads it. Both
         work with no display; \(UsageReport.modeArgument) on its own never fetches, so

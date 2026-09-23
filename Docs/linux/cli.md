@@ -104,6 +104,51 @@ pulse --disable cursor         # 关掉一个
 `AppSettings.enabledAccounts` 的 `didSet` 会拒绝清空并还原。关掉唯一在轨的
 Provider 会返回 `1` 并说明原因。
 
+## `pulse --place` / `--position` / `--autostart` / `--quit`
+
+控制悬浮窗本身。**这些在面板已经运行时立刻生效，不需要杀掉重启。**
+
+```bash
+pulse --place left            # left | right | top | float
+pulse --position 0.5          # 0 = 起点，0.5 = 居中，1 = 末端
+pulse --autostart on          # 登录时自动启动（XDG autostart）
+pulse --quit                  # 关掉正在运行的面板
+```
+
+`--position` 只有一个数，因为**只有一条轴上的比例是有意义的**：贴边的面板在它贴着
+的那条轴上固定、在另一条轴上居中，所以一条左边缘的轨道只有一个自由度，它的名字
+就叫垂直比例。浮动的面板两条比例都有用，此时 `--position` 设的是垂直那条——人说
+"放中间"时指的就是它。
+
+`--quit` 什么都不在跑时返回 `1`："我停掉了它"和"没有东西可停"是两个不同的答案，
+脚本可能在意。
+
+### 生效机制：一个信号，而不是轮询
+
+`--place` 写完设置后给面板发 `SIGUSR1`，面板在**主循环上**（`g_unix_signal_add`，
+不是 `signal()`）收到后重读设置、请求新的窗口尺寸、重新定位。用 `signal()` 的话
+处理器会跑在内核随便挑的线程上，而它要做的是移动窗口——那是和绘制之间的数据竞争。
+
+### 为什么面板自己读文件
+
+**这是实测的结论，不是设计偏好。** `UserDefaults` 在 Linux 上看不到别的进程写的
+东西。探针：一个进程持有 suite，另一个进程改它的 plist，第一个进程在改之前读到
+`nil`、改完三秒后仍读到 `nil`、连**重建实例**后还是 `nil`；而同一个实例能读到自己
+写进去的键。swift-corelibs-foundation 在进程内按 suite 名缓存已解析的域，把同一个
+还给你。只有文件里有新值。
+
+所以 `PanelPlacement.reloaded()` 和 `AppSettings.adoptCommandLineSettings()` 直接读
+plist（`SettingsFile`），`restored()` 那条路在 Linux 上做不到这件事。
+
+macOS 上不需要这些：`cfprefsd` 存在的意义就是让一个进程的写成为另一个进程的读。
+
+### 第二个实测结论：`UserDefaults` 不会自己落盘
+
+`--enable` 写完设置后进程就退出了，而 `UserDefaults` 是"先写内存、之后才到磁盘"，
+所以那次写入随进程消失。`pulse --enable kimiCode` 打印了"2 on the rail"，下一条命令
+读到的文件里还是一个——**这个缺陷早就在 `--set-key` 里**，它存下密钥后会启用对应
+Provider，那次启用一直是丢的。现在在 `PulseCLI.run()` 唯一的出口处 flush 一次。
+
 ## `pulse --help`
 
 打印用法并以 `0` 退出。
