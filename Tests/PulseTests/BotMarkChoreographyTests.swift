@@ -19,7 +19,16 @@ import Testing
 
 @testable import Pulse
 
-@Suite("Bot mark choreography")
+// **Serialized, and that is about the rest of the suite rather than this one.**
+// Several of these tests are minutes of arithmetic inside an `async` test, and
+// an `async` test holds a thread in the cooperative pool for its whole body —
+// so running them four at a time on a four-core machine leaves nothing for
+// anything else. It showed up as a *different* suite failing: `UsageRefreshTests`
+// waits for a pass to end and found its deadline could not even fire, because
+// the `Task` that implements the deadline could not be resumed.
+//
+// One at a time costs this suite some wall-clock and gives the pool back.
+@Suite("Bot mark choreography", .serialized)
 @MainActor
 struct BotMarkChoreographyTests {
     private var calendar: Calendar {

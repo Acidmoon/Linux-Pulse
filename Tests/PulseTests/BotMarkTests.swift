@@ -24,7 +24,16 @@ import Testing
 /// rule that turns a Pulse fact into a mood, and the rule that keeps a brand
 /// colour visible on the disc it sits on. Both of those go wrong by drawing
 /// something plausible rather than by crashing.
-@Suite("Bot mark")
+// **Serialized, and that is about the rest of the suite rather than this one.**
+// Several of these tests are minutes of arithmetic inside an `async` test, and
+// an `async` test holds a thread in the cooperative pool for its whole body —
+// so running them four at a time on a four-core machine leaves nothing for
+// anything else. It showed up as a *different* suite failing: `UsageRefreshTests`
+// waits for a pass to end and found its deadline could not even fire, because
+// the `Task` that implements the deadline could not be resumed.
+//
+// One at a time costs this suite some wall-clock and gives the pool back.
+@Suite("Bot mark", .serialized)
 @MainActor
 struct BotMarkTests {
     @Test("Busy outranks every other reading")
