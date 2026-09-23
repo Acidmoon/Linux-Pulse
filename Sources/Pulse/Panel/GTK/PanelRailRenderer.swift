@@ -26,6 +26,11 @@ enum PanelRailRenderer {
     private static let botScale: Double = 1.4
     /// What the disc gives up a side when a second ring is drawn.
     private static let secondRingSqueeze: Double = 2
+    /// The logo's share of the disc. `UsageRingView`'s own constant.
+    private static let iconScale: Double = 0.8
+    /// A ring with no reading dims its logo rather than hiding it, so the rail
+    /// says at a glance which providers it actually has data for.
+    private static let logoWithoutReading: Double = 0.35
     /// The track behind every arc, at this much of the primary colour.
     private static let trackOpacity: Double = 0.18
     /// The clock arc, measured out from the ring's outer edge.
@@ -157,6 +162,15 @@ enum PanelRailRenderer {
         canvas.fill(.black, opacity: 1)
         canvas.restore()
 
+        // The logo, or the animated mark in its place. Upstream draws one or
+        // the other and never both, and the choice is per account.
+        let known = entry.headline != nil || entry.figure != nil
+        if !entry.showsBotMark {
+            drawLogo(entry.usage.provider, into: canvas, centre: centre,
+                     size: centreDiameter * iconScale,
+                     opacity: known ? 1 : logoWithoutReading)
+        }
+
         if entry.showsBotMark,
            let frame = model.frame(for: entry.id),
            let config = model.configuration(for: entry.id) {
@@ -174,7 +188,6 @@ enum PanelRailRenderer {
         guard DockLayout.showsPercentages(on: model.edge.axis) else { return }
         let figure = entry.headline?.percentText(remaining: entry.showsRemaining)
             ?? entry.figure ?? "—"
-        let known = entry.headline != nil || entry.figure != nil
         let figureColour: Color = spent ? .pulseExhausted : .primary
         let figureOpacity = spent ? 1 : (known ? (entry.isRefreshing ? 0.3 : 1) : 0.4)
         // The label's own centre, half its line height clear of the ring — the
@@ -186,6 +199,61 @@ enum PanelRailRenderer {
         canvas.text(figure, centre: labelCentre,
                     size: DockLayout.percentFontSize, colour: figureColour,
                     opacity: figureOpacity, bold: false)
+    }
+}
+
+
+extension PanelRailRenderer {
+    /// A provider's mark, drawn as a template: one fill, one colour, and only
+    /// the outline matters.
+    ///
+    /// `SVGIcon` parses it into the same commands everything else here draws
+    /// with, so this is the scaling and nothing more — the icon is fitted into
+    /// a square of `size` about `centre`, the way `.resizable().scaledToFit()`
+    /// does on a Mac. A missing icon draws a question mark rather than nothing,
+    /// which is upstream's fallback and is how a broken resource shows up.
+    private static func drawLogo(_ provider: Provider, into canvas: PanelCanvas,
+                                 centre: CGPoint, size: Double, opacity: Double) {
+        guard let icon = SVGIcon.icon(named: provider.iconResource) else {
+            canvas.text("?", centre: centre, size: size * 0.9, colour: .primary,
+                        opacity: opacity * 0.5, bold: false)
+            return
+        }
+        let scale = min(size / icon.viewBox.width, size / icon.viewBox.height)
+        let drawn = CGSize(width: icon.viewBox.width * scale, height: icon.viewBox.height * scale)
+
+        canvas.save()
+        // The viewBox's own origin taken out too, so an icon whose box does not
+        // start at zero lands centred rather than offset by its own margin.
+        let origin = CGPoint(x: centre.x - drawn.width / 2,
+                             y: centre.y - drawn.height / 2)
+        canvas.translate(x: origin.x - icon.viewBox.minX * scale,
+                         y: origin.y - icon.viewBox.minY * scale)
+
+        // **Clipped to the viewBox, which is what an SVG viewport does.** Not a
+        // precaution: `kiro.svg` draws to y = -2.2 and y = 25.5 in a 24-unit box
+        // — measured while writing the test that assumed none of them did — and
+        // a renderer that does not clip draws a shape that spills out of the
+        // ring. Upstream gets this for free from `NSImage`.
+        canvas.setFillRule(evenOdd: true)
+        canvas.emit(CGPath(commands: [
+            .move(to: icon.viewBox.origin),
+            .line(to: CGPoint(x: icon.viewBox.maxX, y: icon.viewBox.minY)),
+            .line(to: CGPoint(x: icon.viewBox.maxX, y: icon.viewBox.maxY)),
+            .line(to: CGPoint(x: icon.viewBox.minX, y: icon.viewBox.maxY)),
+            .close,
+        ]), transform: CGAffineTransform(scaleX: scale, y: scale))
+        canvas.clip()
+        canvas.newPath()
+
+        canvas.setFillRule(evenOdd: icon.evenOdd)
+        canvas.emit(CGPath(commands: icon.commands),
+                    transform: CGAffineTransform(scaleX: scale, y: scale))
+        canvas.fill(.primary, opacity: opacity)
+        canvas.restore()
+        // Put back, because the mark's outlines want the nonzero rule and the
+        // icons want the other one.
+        canvas.setFillRule(evenOdd: false)
     }
 }
 #endif

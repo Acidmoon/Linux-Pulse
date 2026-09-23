@@ -58,6 +58,30 @@ static inline unsigned pulse_add_timer(unsigned milliseconds,
     return g_timeout_add(milliseconds, callback, data);
 }
 
+/* Runs a callback once the window has been mapped.
+ *
+ * **The timing is the whole point.** A position request that arrives before the
+ * surface is mapped is not a request the window manager ever sees: it applies
+ * its own placement policy and the window lands wherever that puts it —
+ * measured, with KWin centring a panel that had asked for the right-hand edge.
+ * `XMoveWindow` after the map is a client request like any other and is
+ * honoured. */
+typedef void (*pulse_map_callback)(GtkWidget* window, void* user_data);
+
+static inline void pulse_map_trampoline(GtkWidget* window, gpointer data) {
+    pulse_map_callback callback = (pulse_map_callback)data;
+    if (callback != NULL) callback(window, NULL);
+}
+
+static inline void pulse_on_map(GtkWidget* window, pulse_map_callback callback) {
+    g_signal_connect_data(window, "map", G_CALLBACK(pulse_map_trampoline),
+                          (gpointer)callback, NULL, (GConnectFlags)0);
+}
+
+static inline int pulse_widget_width(GtkWidget* widget) { return gtk_widget_get_width(widget); }
+static inline int pulse_widget_height(GtkWidget* widget) { return gtk_widget_get_height(widget); }
+static inline int pulse_widget_is_mapped(GtkWidget* widget) { return gtk_widget_get_mapped(widget) ? 1 : 0; }
+
 static inline void pulse_widget_queue_draw(GtkWidget* widget) {
     gtk_widget_queue_draw(widget);
 }
@@ -113,25 +137,23 @@ static inline GtkWidget* pulse_drawing_area_new(void) {
     return gtk_drawing_area_new();
 }
 
-/* The draw callback, as a plain function of (context, width, height).
+/* The draw callback, handed straight to GTK.
  *
- * `gtk_drawing_area_set_draw_func` takes a five-argument GTK-shaped callback
- * whose first and last arguments are a widget and a user-data pointer the panel
- * has no use for. Narrowing it to what is actually drawn means Swift passes a
- * `@convention(c)` closure straight in, with no `unsafeBitCast` at the call site
- * and no risk of getting the widget type wrong. */
-typedef void (*pulse_draw_callback)(cairo_t* context, int width, int height, void* user_data);
-
-static inline void pulse_draw_trampoline(GtkDrawingArea* area, cairo_t* context,
-                                         int width, int height, gpointer data) {
-    (void)area;
-    pulse_draw_callback callback = (pulse_draw_callback)data;
-    if (callback != NULL) callback(context, width, height, NULL);
-}
-
-static inline void pulse_drawing_area_set_draw(GtkWidget* area, pulse_draw_callback callback) {
-    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(area), pulse_draw_trampoline,
-                                   (gpointer)callback, NULL);
+ * **No trampoline, which was the first version and did not work.** A helper that
+ * wrapped GTK's five-argument callback down to four and passed the real one
+ * through `user_data` took the address of a `static inline` function in a
+ * header-only module — which links, and then never fires: the panel ticked along
+ * at 30fps with `gtk_widget_queue_draw` called on every one of them and the draw
+ * callback never ran once. `GtkDrawingAreaDrawFunc` is a plain function pointer
+ * that Swift can express, so it is passed through unchanged and the user data
+ * carries what the panel needs.
+ *
+ * `gtk_widget_queue_draw` is kept for `pulse_drawing_area_set_draw`'s callers to
+ * ask for one. */
+static inline void pulse_drawing_area_set_draw(GtkWidget* area,
+                                               GtkDrawingAreaDrawFunc callback,
+                                               gpointer user_data) {
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(area), callback, user_data, NULL);
 }
 
 /* Asked for a redraw, and the surface told it is transparent. Without the

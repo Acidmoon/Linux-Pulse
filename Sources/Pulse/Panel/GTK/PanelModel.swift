@@ -106,6 +106,14 @@ package final class PanelModel {
     var isDocked: Bool { placement.isDocked }
     var edge: PanelEdge { placement.edge }
 
+    /// The monitor the last `geometry(forScreen:)` was asked about, and the
+    /// rail's top-left in that space as *requested*. Kept so the correction
+    /// below can be made against the frame the window actually got.
+    private var monitorRect: CGRect = .zero
+    private var requestedRailTopLeft: CGPoint = .zero
+    /// The window's top edge in AppKit terms, which is what the flip needs.
+    private var screenTop: Double = 0
+
     /// Where the rail sits inside the window, in the panel's own top-left space.
     /// Written by `geometry(forScreen:)` from the placement's answer, and read
     /// by the renderer — so the rail is drawn where the window manager actually
@@ -130,18 +138,34 @@ package final class PanelModel {
         let top = monitor.minY + monitor.height
         let appKit = CGRect(x: monitor.minX, y: monitor.minY,
                             width: monitor.width, height: monitor.height)
+        // **Never taller or wider than the screen.** Upstream's `PanelLayout`
+        // computes the *maximum* the panel could need — a rail with every
+        // provider switched on plus the card that unfolds beside it, which is
+        // 1822 points on a laptop. A Mac's AppKit constrains the frame and moves
+        // on. KWin **maximises** it instead, and a maximised window ignores
+        // `XMoveWindow` — measured: the panel asked for the right-hand edge and
+        // appeared centred, with `_NET_WM_STATE_MAXIMIZED_VERT` set on it. The
+        // rail still fits, because `confirmWindow` re-derives its offsets from
+        // the frame the window actually got.
+        let maximum = CGSize(width: min(panelSize.width, appKit.width),
+                             height: min(panelSize.height, appKit.height))
         let layout = placement.layout(in: appKit, topEdge: top,
-                                      panel: panelSize, rail: railSize)
+                                      panel: maximum, rail: railSize)
         let windowOrigin = CGPoint(x: layout.frame.minX, y: top - layout.frame.maxY)
         let rail = CGPoint(x: layout.railOrigin.x - layout.frame.minX,
                            y: layout.frame.maxY - layout.railOrigin.y)
         railOrigin = rail
+        monitorRect = appKit
+        screenTop = top
+        // The rail's top-left in AppKit terms, which is what `offsets` wants.
+        requestedRailTopLeft = CGPoint(x: layout.railOrigin.x, y: layout.railOrigin.y)
+
         let side: PanelSide = switch placement.edge {
         case .left: .left
         case .right: .right
         case .top: .top
         }
-        return PanelGeometry(windowOrigin: windowOrigin, size: panelSize,
+        return PanelGeometry(windowOrigin: windowOrigin, size: maximum,
                              railOrigin: rail, side: side)
     }
 
@@ -291,6 +315,49 @@ package final class PanelModel {
     /// Draws everything. The one entry point the panel executable calls.
     package func draw(into canvas: PanelCanvas, size: CGSize, at date: Date) {
         PanelRailRenderer.draw(entries, model: self, into: canvas, size: size)
+    }
+
+    /// **The rail's offsets, recomputed from the frame the window really got.**
+    ///
+    /// `PanelPlacement.layout` returns a frame that is a *request*. A panel as
+    /// tall as a rail with every provider on is taller than a laptop screen, so
+    /// the window manager shortens it — measured here: 1822 points asked for on
+    /// a 1080-point display, 1024 given back. Offsets measured from a frame the
+    /// window never had are relative to a position it is not in, and on this
+    /// screen they put the rail below the bottom of its own window: invisible.
+    ///
+    /// Upstream's own comment on `offsets(forRailTopLeft:in:rail:)` describes
+    /// exactly this, including the 72-point error it caused there. The
+    /// arithmetic is theirs; this only supplies the frame.
+    ///
+    /// `origin` and `size` come from the window manager, in top-down screen
+    /// coordinates.
+    package func confirmWindow(origin: CGPoint, size: CGSize) {
+        guard monitorRect != .zero else { return }
+        let actual = CGRect(x: origin.x,
+                            y: screenTop - (origin.y + size.height),
+                            width: size.width, height: size.height)
+        let offsets = PanelPlacement.offsets(forRailTopLeft: requestedRailTopLeft,
+                                             in: actual, rail: railSize)
+        // `leading` and `top` are already measured from the frame's top-left
+        // corner — `top` is `frame.maxY - origin.y`, which in AppKit's y-up
+        // space is a distance *down* from the top — so no flip is needed here.
+        railOrigin = CGPoint(x: offsets.leading, y: offsets.top)
+
+        // Said out loud when asked. Whether the rail is inside its own window is
+        // not something a test can see, and a rail below the bottom of a
+        // shortened window looks like a panel that failed to draw rather than
+        // like arithmetic that used the wrong frame.
+        if ProcessInfo.processInfo.environment["PULSE_PANEL_DEBUG"] != nil {
+            let fits = railOrigin.y + railSize.height <= size.height
+            let line = "Pulse panel: window \(Int(size.width))x\(Int(size.height)) at "
+                + "(\(Int(origin.x)), \(Int(origin.y))), asked for "
+                + "\(Int(panelSize.width))x\(Int(panelSize.height)); rail "
+                + "\(Int(railSize.width))x\(Int(railSize.height)) at "
+                + "(\(Int(railOrigin.x)), \(Int(railOrigin.y))) - "
+                + (fits ? "inside the window" : "**outside the window**")
+            FileHandle.standardError.write(Data((line + "\n").utf8))
+        }
     }
 
     /// The pointer moved, in the panel's own top-left space. Nil when it left.

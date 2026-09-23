@@ -34,6 +34,12 @@ package protocol PanelCanvas: AnyObject {
 
     func close()
 
+    /// `evenodd` or nonzero, which decides whether the second of two nested
+    /// outlines is a hole or another filled shape. **Every one of the bundled
+    /// icons declares `evenodd`** — measured, all 34 — and without it most of
+    /// them draw as solid blobs.
+    func setFillRule(evenOdd: Bool)
+
     func fill(_ colour: Color, opacity: Double)
     func fillGradient(_ stops: [Color], from: CGPoint, to: CGPoint, opacity: Double)
     func stroke(_ colour: Color, opacity: Double, width: Double)

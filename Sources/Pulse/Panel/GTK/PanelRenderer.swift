@@ -49,6 +49,10 @@ enum PanelRenderer {
         guard let headPath = frame.headPath.copy(using: &combined) else { return }
 
         canvas.emit(headPath)
+        // The mark's outlines are wound so a hole stays a hole, which is the
+        // nonzero rule; the icons are the opposite and set it themselves, so it
+        // is put back here rather than left to whichever drew last.
+        canvas.setFillRule(evenOdd: false)
         canvas.fillKeepingPath(config.color, opacity: frame.opacity)
 
         // `eyeLayer.clip(to: head)`. The head path is still current from the

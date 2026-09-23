@@ -47,6 +47,10 @@ final class Panel {
     private var window: UnsafeMutablePointer<GtkWidget>?
     private var area: UnsafeMutablePointer<GtkWidget>?
     private var timer: UInt32 = 0
+    /// Whether the window's real frame has been read back yet. It cannot be read
+    /// until the window manager has finished with the move, so it waits for the
+    /// first draw.
+    private var confirmedFrame = false
 
     /// The animation rate. 30fps, which is what upstream's SwiftUI view chose:
     /// everything the mark plays is slow, and seven engines redrawing at the
@@ -70,8 +74,14 @@ final class Panel {
         // taking focus on map is what makes the first frame flicker.
         pulse_window_set_focusable(window, 0)
 
-        let size = model.panelSize
-        pulse_window_set_default_size(window, Int32(size.width), Int32(size.height))
+        // The geometry is worked out **before the window exists**, because the
+        // size it asks for has to fit the screen: a window taller than the
+        // display gets maximised by the window manager, and a maximised window
+        // cannot be moved. See `PanelModel.geometry(forScreen:)`.
+        let monitor = currentMonitor()
+        let geometry = model.geometry(forScreen: monitor.rect)
+        pulse_window_set_default_size(window, Int32(geometry.size.width),
+                                      Int32(geometry.size.height))
 
         // The stylesheet, which exists for one reason: GTK clears a window to
         // the theme's background unless it is told not to, and a "transparent"
@@ -86,11 +96,25 @@ final class Panel {
         self.area = area
         pulse_widget_add_class(area, "pulse-panel")
         pulse_drawing_area_make_transparent(area)
+        // **The size request is what makes the window the right size.** A
+        // non-resizable `GtkWindow` takes its size from its child's natural
+        // size, and a `GtkDrawingArea`'s natural size is 0×0 — so `set_default_size`
+        // is ignored and the panel comes out **0 by 0**, mapped, invisible, and
+        // with no error anywhere. Measured with `gtk_widget_get_width` on the
+        // real window. Asking the area for the size is the version that works
+        // and still leaves the window un-resizable by the reader.
+        pulse_widget_set_size_request(area, Int32(geometry.size.width),
+                                      Int32(geometry.size.height))
         pulse_window_set_child(window, area)
-        pulse_drawing_area_set_draw(area, Panel.drawCallback)
+        pulse_drawing_area_set_draw(area, Panel.drawCallback,
+                                    Unmanaged.passUnretained(self).toOpaque())
 
+        // **Positioned on the map signal, not before it.** See `pulse_on_map`:
+        // a move that arrives before the surface is mapped is not a request the
+        // window manager sees, and KWin centred a panel that had asked for the
+        // right-hand edge.
+        pulse_on_map(window, Panel.mapCallback)
         pulse_window_present(window)
-        applyBackendHints()
 
         // The first reading, and the animation clock. `refresh` is asked once
         // and the store paces itself from there.
@@ -99,12 +123,13 @@ final class Panel {
                                 Unmanaged.passUnretained(self).toOpaque())
     }
 
-    /// Where the window goes, and how it stays there.
+    /// Where the window goes, and how it stays there. Runs on the map signal.
     private func applyBackendHints() {
         guard let window, let area else { return }
         let backend = String(cString: pulse_display_backend())
         let monitor = currentMonitor()
         let geometry = model.geometry(forScreen: monitor.rect)
+        let _ = area
         switch backend {
         case "wayland":
             #if canImport(CGTK4LayerShell)
@@ -185,7 +210,13 @@ final class Panel {
     /// Everything they call is main-actor bound, and GTK calls a draw or a
     /// timer callback on the main thread — which is a fact GTK documents, stated
     /// once, here.
-    private static let drawCallback: pulse_draw_callback = { context, width, height, data in
+    /// **GTK's own five-argument callback**, passed through with no wrapper —
+    /// see `pulse_drawing_area_set_draw`.
+    private static let drawCallback: @convention(c) (UnsafeMutablePointer<GtkDrawingArea>?,
+                                                     OpaquePointer?,
+                                                     Int32, Int32,
+                                                     UnsafeMutableRawPointer?) -> Void = {
+        _, context, width, height, data in
         guard let context, let data else { return }
         // **Addresses, not pointers.** A C pointer is not `Sendable`, so
         // carrying one into a main-actor closure is a data-race error — and it
@@ -203,6 +234,26 @@ final class Panel {
         }
     }
 
+    /// The window is on screen, so a position request will be honoured and a
+    /// read-back will describe something real.
+    private static let mapCallback: @convention(c) (UnsafeMutablePointer<GtkWidget>?, UnsafeMutableRawPointer?) -> Void = { _, _ in
+        MainActor.assumeIsolated {
+            // The instance pointer is not carried by this signal, and there is
+            // one panel per process — so the panel is held in a box the entry
+            // point fills in. See `LivePanel` below.
+            LivePanel.current?.place()
+        }
+    }
+
+    /// Where the window goes and how it stays there, once it exists.
+    ///
+    /// Split out of `present` because it has to run **after** the map. Called
+    /// once; the rail's own offsets then follow from the frame the window really
+    /// got, which is what `PanelModel.confirmWindow` is for.
+    func place() {
+        applyBackendHints()
+    }
+
     private static let tickCallback: @convention(c) (UnsafeMutableRawPointer?) -> Int32 = { data in
         guard let data else { return 0 }
         let panelAddress = Int(bitPattern: data)
@@ -214,6 +265,26 @@ final class Panel {
     }
 
     private func draw(into context: OpaquePointer, width: Int, height: Int) {
+        if ProcessInfo.processInfo.environment["PULSE_PANEL_DEBUG"] != nil {
+            FileHandle.standardError.write(Data("draw \(width)x\(height)\n".utf8))
+        }
+        // **The frame is confirmed on the first draw, not when the move is
+        // asked for.** A position request is asynchronous: measured here, the
+        // read-back immediately after `XMoveWindow` still said (0, 0) while the
+        // window was at (1578, 0) a moment later. By the first draw the window
+        // manager has finished, and the rail's offsets are then measured against
+        // the frame it really got — which is the whole point of
+        // `PanelModel.confirmWindow`.
+        if !confirmedFrame, let window {
+            var x: Int32 = 0, y: Int32 = 0, frameWidth: Int32 = 0, frameHeight: Int32 = 0
+            if pulse_x11_window_geometry(window, &x, &y, &frameWidth, &frameHeight) == 1 {
+                confirmedFrame = true
+                model.confirmWindow(origin: CGPoint(x: Double(x), y: Double(y)),
+                                    size: CGSize(width: Double(frameWidth),
+                                                 height: Double(frameHeight)))
+            }
+        }
+
         let canvas = CairoCanvas(context)
         canvas.save()
         // Cleared to nothing first: the window is transparent and the rail is
@@ -228,6 +299,14 @@ final class Panel {
                    size: CGSize(width: Double(width), height: Double(height)),
                    at: Date())
     }
+}
+
+/// The one panel in this process, so the map signal's callback can reach it.
+/// GTK's `map` signal carries the widget and nothing else, and there is exactly
+/// one panel per process by construction.
+@MainActor
+enum LivePanel {
+    static var current: Panel?
 }
 
 // MARK: - Entry
@@ -264,6 +343,7 @@ guard let application = pulse_application_new() else {
 
 let model = PanelModel()
 let panel = Panel(model: model)
+LivePanel.current = panel
 
 /// The panel has to survive as long as the signal connection does, which is the
 /// life of the application.

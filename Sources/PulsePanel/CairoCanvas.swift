@@ -72,6 +72,10 @@ final class CairoCanvas: PanelCanvas {
     func translate(x: Double, y: Double) { cairo_translate(context, x, y) }
     func clip() { cairo_clip(context) }
 
+    func setFillRule(evenOdd: Bool) {
+        cairo_set_fill_rule(context, evenOdd ? CAIRO_FILL_RULE_EVEN_ODD : CAIRO_FILL_RULE_WINDING)
+    }
+
     func fill(_ colour: Color, opacity: Double) {
         setSource(colour, opacity: opacity)
         cairo_fill(context)
