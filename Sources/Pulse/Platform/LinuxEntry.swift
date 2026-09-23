@@ -53,8 +53,37 @@ enum PulseLinuxMain {
             return StatusLineHook.uninstall() ? 0 : 1
         }
 
+        // **Before anything else that could start the panel.** `pulse --help`
+        // used to reach the end of this and open the rail, which is a strange
+        // answer to a question about the command line — and it made the usage
+        // text unreachable on a machine where the panel is installed, which is
+        // every machine that has one.
+        if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-h") {
+            print(usage)
+            return 0
+        }
+
         if CommandLine.arguments.contains(UsageReport.modeArgument) {
             return UsageReport.run()
+        }
+
+        // What is on the rail, and what is not — the question somebody running
+        // `--enable` is really asking is *why is that ring empty?*, so the list
+        // says which are switched off rather than only which are on.
+        if CommandLine.arguments.contains("--providers") {
+            print(ProviderCommand.list())
+            return 0
+        }
+
+        // Which providers the rail shows, which had no command at all.
+        //
+        // **The presence of the argument is checked here, not inside.** The
+        // first version looped over the two names and called `run(argument:)`
+        // with each — which matched its own name every time and ran, so
+        // `--providers` reported "--enable needs a provider name".
+        for argument in [ProviderCommand.enableArgument, ProviderCommand.disableArgument]
+        where CommandLine.arguments.contains(argument) {
+            if let code = ProviderCommand.run(argument: argument) { return code }
         }
 
         // After `--json`, because the two are usually run together and the one
@@ -132,6 +161,11 @@ enum PulseLinuxMain {
           --statusline           Claude Code status line mode (reads stdin)
           --install-statusline   register this binary as Claude Code's status line
           --uninstall-statusline undo that
+
+        \(ProviderCommand.enableArgument) <provider>    show it on the rail
+        \(ProviderCommand.disableArgument) <provider>   take it off
+        --providers            what is on the rail, and what is not
+        --help                 this
 
         \(UsageRefresh.modeArgument) fills the cache and \(UsageReport.modeArgument) reads it. Both
         work with no display; \(UsageReport.modeArgument) on its own never fetches, so

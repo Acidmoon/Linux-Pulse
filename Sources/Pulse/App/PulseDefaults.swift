@@ -24,17 +24,40 @@ import Foundation
 /// this file: one place that says where settings live, differing only where the
 /// platforms do.
 enum PulseDefaults {
-    #if canImport(AppKit)
-    /// On a Mac this is the bundle's own domain, which is what every Pulse on
-    /// that machine already uses.
-    nonisolated(unsafe) static let shared = UserDefaults.standard
-    #else
-    /// The suite named `Pulse`, which swift-corelibs-foundation reads and writes
-    /// as `~/.config/Pulse.plist` — the same file the command-line binary has
-    /// always used, so nothing moves for anyone already running it.
-    /// `nonisolated(unsafe)` for `UserDefaults`' own reason, not this file's:
-    /// the class is thread-safe and simply is not marked `Sendable`. Upstream
-    /// reached it as `UserDefaults.standard`, which has the same shape.
-    nonisolated(unsafe) static let shared: UserDefaults = UserDefaults(suiteName: "Pulse") ?? .standard
-    #endif
+    /// **`var`, so a test can point it somewhere of its own.**
+    ///
+    /// A `let` was the tidier thing and it made these tests untestable in the
+    /// way that matters: everything reads and writes through this one value, so
+    /// a test that changes a setting changes the machine's, and a test that
+    /// asserts on a setting asserts about whatever else in the suite wrote last.
+    /// Two tests here passed alone and failed in the suite for exactly that
+    /// reason — and before that they were quietly writing to the developer's own
+    /// settings file.
+    ///
+    /// `nonisolated(unsafe)` because a global var is; the atomicity that matters
+    /// is `UserDefaults`' own, and nothing swaps this outside a test's setup and
+    /// teardown. `Sources/PulsePanel` never touches it.
+    nonisolated(unsafe) static var shared: UserDefaults = {
+        #if canImport(AppKit)
+        // On a Mac this is the bundle's own domain, which is what every Pulse on
+        // that machine already uses.
+        return UserDefaults.standard
+        #else
+        // The suite named `Pulse`, which swift-corelibs-foundation reads and
+        // writes as `~/.config/Pulse.plist` — the same file the command-line
+        // binary has always used, so nothing moves for anyone already running
+        // it.
+        //
+        // **`PULSE_DEFAULTS_SUITE` redirects it, and the test suite sets it.**
+        // `swift test` was writing the developer's own settings: everything
+        // reads and writes through this one value, so any test that changes a
+        // setting changes the machine's — running the suite left this file
+        // holding `settings.enabledProviders = ['codex#test']`, a ring from
+        // somebody's fixture, and left it there. `Scripts/linux/test.sh` and CI
+        // both set the variable, so the suite is hermetic without every test
+        // having to remember.
+        let suite = ProcessInfo.processInfo.environment["PULSE_DEFAULTS_SUITE"] ?? "Pulse"
+        return UserDefaults(suiteName: suite) ?? .standard
+        #endif
+    }()
 }

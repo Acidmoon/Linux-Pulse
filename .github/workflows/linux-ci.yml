@@ -117,7 +117,10 @@ jobs:
         id: test
         run: |
           source Scripts/linux/swift-env.sh
-          swift test 2>&1 | tee /tmp/test.log
+          # `PULSE_DEFAULTS_SUITE` keeps the suite's settings writes out of the
+          # runner's own config, where they were landing — see
+          # `Scripts/linux/test.sh`, which is the same thing with the exports.
+          PULSE_DEFAULTS_SUITE=pulse-tests swift test 2>&1 | tee /tmp/test.log
 
       # **The panel is drawn here, with no display at all.** `--render` writes
       # the rail and the card into a PNG through the same code the window draws
