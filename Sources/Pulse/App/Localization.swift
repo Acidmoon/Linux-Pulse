@@ -186,8 +186,24 @@ extension String {
     /// Closing that gap is roadmap phase 3; it needs a format-string scheme of
     /// Pulse's own or a move to gettext, and it is a change to how every
     /// translated string is authored, not a portability shim.
-    static func localized(_ key: String) -> String {
+    /// A key that is already a `String` rather than a literal.
+    ///
+    /// **Labelled, and that is not cosmetic.** With a bare `_` this overload and
+    /// the `LocalizedKey` one are both reachable from `localized("\(x) Used")`
+    /// — a string literal can be a `String` — and the compiler picks this one,
+    /// which is the collapse the whole shim exists to prevent. A different label
+    /// makes the choice explicit at every call site that has one to make.
+    static func localized(raw key: String) -> String {
         LocalizationSource.bundle.localizedString(forKey: key, value: key, table: nil)
+    }
+
+    /// The interpolated form, through `LocalizedKey`. See that type for why the
+    /// key and its arguments have to stay apart until the table has been read.
+    static func localized(_ key: LocalizedKey) -> String {
+        let translated = LocalizationSource.bundle.localizedString(
+            forKey: key.key, value: key.key, table: nil)
+        guard !key.arguments.isEmpty else { return translated }
+        return String(format: translated, arguments: key.arguments)
     }
     #endif
 }
@@ -198,6 +214,69 @@ extension Text {
     /// `String.localized(_:)` for why the implicit form can't be used.
     init(localized key: String.LocalizationValue) {
         self.init(String.localized(key))
+    }
+}
+#endif
+
+#if !canImport(Darwin)
+/// `String.LocalizationValue`, which Linux's Foundation does not have.
+///
+/// **This is what makes a translated sentence with a number in it work.** On a
+/// Mac, `String.localized("\(figure) Used")` passes a value that keeps the
+/// *key* and the *arguments* apart — the key being `"%@ Used"`, which is what
+/// the `.lproj` tables are indexed by. Linux's Foundation has no
+/// `LocalizationValue` and no `String(localized:bundle:)`, so the same call
+/// collapses to the finished sentence `"10% Used"` before anything looks it up,
+/// and no entry in any table can ever match. Sixty-three call sites and
+/// fifty-nine keys per language were going untranslated because of it, and the
+/// gap was written down as "roadmap phase 3" until this.
+///
+/// **Every interpolation is `%@`.** Measured across all five `.lproj` tables
+/// first: fifty-nine interpolated keys each, and every placeholder in every one
+/// of them is `%@` — there is no `%lld`, no `%d`, no positional form. So an
+/// argument is described as a string and handed to `String(format:)`, which is
+/// both what the tables expect and the only thing that can be right when the
+/// same key has to serve a percentage, a count and a currency amount.
+///
+/// It is `ExpressibleByStringInterpolation` rather than a function because that
+/// is what lets the call sites stay as they are. `String.localized("\(x) Used")`
+/// is upstream's spelling and the tables are keyed by what it produces; adding
+/// an argument to sixty-three calls would have been a change to how every
+/// translated string in the app is authored.
+struct LocalizedKey: ExpressibleByStringInterpolation, Sendable {
+    let key: String
+    let arguments: [String]
+
+    init(stringLiteral value: String) {
+        self.key = value
+        self.arguments = []
+    }
+
+    init(stringInterpolation: Interpolation) {
+        self.key = stringInterpolation.key
+        self.arguments = stringInterpolation.arguments
+    }
+
+    struct Interpolation: StringInterpolationProtocol {
+        fileprivate(set) var key = ""
+        fileprivate(set) var arguments: [String] = []
+
+        init(literalCapacity: Int, interpolationCount: Int) {
+            key.reserveCapacity(literalCapacity + interpolationCount * 2)
+        }
+
+        mutating func appendLiteral(_ literal: String) {
+            key += literal
+        }
+
+        /// One overload, taking anything that can describe itself. A narrower
+        /// set — `String`, `Int`, `Double` — would leave `URL`, `Date` or a
+        /// provider's own type unresolvable at the call site, which is how a
+        /// shim becomes a reason to change upstream code after all.
+        mutating func appendInterpolation<T>(_ value: T) {
+            key += "%@"
+            arguments.append(String(describing: value))
+        }
     }
 }
 #endif
