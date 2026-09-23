@@ -120,10 +120,17 @@ final class Panel {
         // here where the signal's signature is known — see `pulse_connect` for
         // why they are not wrapped in C.
         let pointer = pulse_pointer_controller(area)
-        pulse_connect(pointer, "motion",
-                      unsafeBitCast(Panel.motionCallback, to: GCallback.self), panelPointer)
-        pulse_connect(pointer, "leave",
-                      unsafeBitCast(Panel.leaveCallback, to: GCallback.self), panelPointer)
+        let motionHandler = pulse_connect(pointer, "motion",
+                                          unsafeBitCast(Panel.motionCallback, to: GCallback.self),
+                                          panelPointer)
+        let leaveHandler = pulse_connect(pointer, "leave",
+                                         unsafeBitCast(Panel.leaveCallback, to: GCallback.self),
+                                         panelPointer)
+        if ProcessInfo.processInfo.environment["PULSE_PANEL_DEBUG"] != nil {
+            FileHandle.standardError.write(Data(
+                ("pointer controller \(pointer != nil), motion handler \(motionHandler), "
+                 + "leave handler \(leaveHandler)\n").utf8))
+        }
 
         // **Positioned on the map signal, not before it.** See `pulse_on_map`:
         // a move that arrives before the surface is mapped is not a request the
@@ -341,6 +348,15 @@ final class Panel {
 
     private func pointerMoved(to point: CGPoint?) {
         model.setPointer(point)
+        if ProcessInfo.processInfo.environment["PULSE_PANEL_DEBUG"] != nil {
+            let where_ = point.map { "(\(Int($0.x)), \(Int($0.y)))" } ?? "off the panel"
+            let strip = model.hoverStrip
+            FileHandle.standardError.write(Data(
+                ("pointer \(where_) -> open \(model.railOpenness > 0.5), "
+                 + "ring \(model.selectedSlot ?? "none"), "
+                 + "strip (\(Int(strip.minX)),\(Int(strip.minY))) "
+                 + "\(Int(strip.width))x\(Int(strip.height))\n").utf8))
+        }
     }
 
     private static let tickCallback: @convention(c) (UnsafeMutableRawPointer?) -> Int32 = { data in

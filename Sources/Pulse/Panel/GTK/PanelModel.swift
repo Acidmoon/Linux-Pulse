@@ -74,7 +74,7 @@ package final class PanelModel {
     /// already in the module and is the same integrator the mark uses.
     private var openness = BotMarkSpring(0)
     /// The ring the pointer is on, if any.
-    private(set) var selectedSlot: String?
+    package private(set) var selectedSlot: String?
     private var isQuiet = false
     private var lastActivity = Date()
     private var lastAdvance = Date()
@@ -463,6 +463,14 @@ package final class PanelModel {
         isQuiet = false
         isHovered = isOverContent(point)
         selectedSlot = selectedSlot(at: point)
+    }
+
+    /// The strip's rectangle, for the debug line. Off-panel it is what the
+    /// pointer has to be inside to open the rail, and a hover that does not work
+    /// is almost always this rectangle and the pointer disagreeing.
+    package var hoverStrip: CGRect {
+        PanelHitArea.strip(edge: placement.edge, railSize: railSize,
+                           railTop: railOrigin.y, railLeading: railOrigin.x)
     }
 
     /// Whether the pointer counts as being on the panel.
