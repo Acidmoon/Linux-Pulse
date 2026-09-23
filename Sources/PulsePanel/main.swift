@@ -55,6 +55,9 @@ final class Panel {
     /// reported the panel centred at (789, 0) while the next two reported
     /// (1578, 0), and with a single confirmation the first one kept it. Two
     /// identical reads in a row is the signal that the frame has settled.
+    /// The right-click menu. Held so the gesture can open it and so it is not
+    /// collected while it is on screen.
+    private var popover: UnsafeMutablePointer<GtkWidget>?
     private var confirmedFrame = CGRect.zero
     private var confirmAttempts = 0
 
@@ -148,6 +151,31 @@ final class Panel {
         // picks a ring; leaving closes both. The callbacks are Swift's, cast
         // here where the signal's signature is known — see `pulse_connect` for
         // why they are not wrapped in C.
+        // **The menu the panel never had.** Upstream's menu bar held Settings
+        // and Quit; with no tray on Linux there was nothing, and a reader who
+        // started the panel had no way to stop it but killing the process. So
+        // those items live on the panel, on a right-click.
+        let popover = pulse_popover_new()
+        let menuPointer = Unmanaged.passUnretained(self).toOpaque()
+        pulse_popover_add_button(popover, String.localized("Refresh now"),
+                                 unsafeBitCast(Panel.refreshAllCallback, to: GCallback.self),
+                                 menuPointer)
+        pulse_popover_add_button(popover, String.localized("Quit Pulse"),
+                                 unsafeBitCast(Panel.quitCallback, to: GCallback.self),
+                                 menuPointer)
+        pulse_widget_set_parent(popover, area)
+        self.popover = popover
+
+        // A left click on a ring refreshes that provider; a right click opens
+        // the menu. Both are on the drawing area, so both use the coordinates
+        // the hit test already measures in.
+        _ = pulse_click_gesture(area, 1,
+                                unsafeBitCast(Panel.leftClickCallback, to: GCallback.self),
+                                panelPointer)
+        _ = pulse_click_gesture(area, 3,
+                                unsafeBitCast(Panel.rightClickCallback, to: GCallback.self),
+                                panelPointer)
+
         let pointer = pulse_pointer_controller(area)
         let motionHandler = pulse_connect(pointer, "motion",
                                           unsafeBitCast(Panel.motionCallback, to: GCallback.self),
@@ -183,13 +211,21 @@ final class Panel {
         let geometry = model.geometry(forScreen: monitor.rect)
         let _ = area
         if ProcessInfo.processInfo.environment["PULSE_PANEL_DEBUG"] != nil {
+            // **Asked only where it means something.** `gtk_layer_is_supported`
+            // on X11 makes GTK log a `CRITICAL` about `GDK_IS_WAYLAND_DISPLAY` —
+            // the first thing this port measured — so a diagnostic that asked
+            // unconditionally produced a warning about a thing that was working
+            // exactly as intended. It did, until this.
+            var layerShell = "n/a (x11)"
             #if canImport(CGTK4LayerShell)
-            let layerShell = pulse_layer_shell_supported() == 1
+            if backend == "wayland" {
+                layerShell = pulse_layer_shell_supported() == 1 ? "yes" : "no"
+            }
             #else
-            let layerShell = false
+            if backend == "wayland" { layerShell = "not built in" }
             #endif
             FileHandle.standardError.write(Data(
-                ("backend \(backend), layer-shell supported \(layerShell), "
+                ("backend \(backend), layer-shell \(layerShell), "
                  + "composited \(pulse_display_has_alpha() == 1), "
                  + "monitors \(pulse_monitor_count())\n").utf8))
         }
@@ -392,6 +428,19 @@ final class Panel {
         confirmedFrame = .zero
     }
 
+    /// A click on a ring refreshes that provider, which is upstream's
+    /// `onRefresh` — the ring is chosen by the same hit test that opens its
+    /// card, so what is refreshed is what was pointed at.
+    private func clicked(at point: CGPoint) {
+        guard let slot = model.slotID(at: point) else { return }
+        model.refresh(slot)
+    }
+
+    private func openMenu() {
+        guard let popover else { return }
+        pulse_popover_popup_at_pointer(popover)
+    }
+
     private func pointerMoved(to point: CGPoint?) {
         model.setPointer(point)
         if ProcessInfo.processInfo.environment["PULSE_PANEL_DEBUG"] != nil {
@@ -402,6 +451,61 @@ final class Panel {
                  + "ring \(model.selectedSlot ?? "none"), "
                  + "strip (\(Int(strip.minX)),\(Int(strip.minY))) "
                  + "\(Int(strip.width))x\(Int(strip.height))\n").utf8))
+        }
+    }
+
+    /// The gesture callbacks. GTK's `pressed` signal carries the gesture, how
+    /// many presses and where — the gesture is an incomplete type on the Swift
+    /// side and is not used, so it arrives as a raw pointer.
+    private static let leftClickCallback: @convention(c) (UnsafeMutableRawPointer?, Int32,
+                                                          Double, Double,
+                                                          UnsafeMutableRawPointer?) -> Void = {
+        _, _, x, y, data in
+        guard let data else { return }
+        let address = Int(bitPattern: data)
+        MainActor.assumeIsolated {
+            guard let raw = UnsafeMutableRawPointer(bitPattern: address) else { return }
+            Unmanaged<Panel>.fromOpaque(raw).takeUnretainedValue()
+                .clicked(at: CGPoint(x: x, y: y))
+        }
+    }
+
+    private static let rightClickCallback: @convention(c) (UnsafeMutableRawPointer?, Int32,
+                                                           Double, Double,
+                                                           UnsafeMutableRawPointer?) -> Void = {
+        _, _, _, _, data in
+        guard let data else { return }
+        let address = Int(bitPattern: data)
+        MainActor.assumeIsolated {
+            guard let raw = UnsafeMutableRawPointer(bitPattern: address) else { return }
+            Unmanaged<Panel>.fromOpaque(raw).takeUnretainedValue().openMenu()
+        }
+    }
+
+    /// A button in the popover. `clicked` carries the button, which is not used.
+    private static let refreshAllCallback: @convention(c) (UnsafeMutableRawPointer?,
+                                                           UnsafeMutableRawPointer?) -> Void = {
+        _, data in
+        guard let data else { return }
+        let address = Int(bitPattern: data)
+        MainActor.assumeIsolated {
+            guard let raw = UnsafeMutableRawPointer(bitPattern: address) else { return }
+            let panel = Unmanaged<Panel>.fromOpaque(raw).takeUnretainedValue()
+            panel.model.refresh()
+            if let popover = panel.popover { pulse_popover_popdown(popover) }
+        }
+    }
+
+    private static let quitCallback: @convention(c) (UnsafeMutableRawPointer?,
+                                                     UnsafeMutableRawPointer?) -> Void = { _, data in
+        guard let data else { return }
+        let address = Int(bitPattern: data)
+        MainActor.assumeIsolated {
+            guard let raw = UnsafeMutableRawPointer(bitPattern: address) else { return }
+            // The panel is the application: there is nothing else to leave
+            // running, and the process is what the window manager is tracking.
+            _ = Unmanaged<Panel>.fromOpaque(raw).takeUnretainedValue()
+            exit(0)
         }
     }
 

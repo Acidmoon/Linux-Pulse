@@ -197,6 +197,28 @@ package final class PanelModel {
         store.start()
     }
 
+    /// Refreshes one ring's account, which is what a click on a ring is for.
+    ///
+    /// Upstream's `onRefresh`, wired to the same `UsageStore.refresh(_:)`. The
+    /// ring under the pointer is chosen by the same hit test that opens its
+    /// card, so what a click refreshes is what the reader was pointing at.
+    package func refresh(_ slotID: String) {
+        guard let entry = entries.first(where: { $0.id == slotID }) else { return }
+        store.refresh(entry.slot.account)
+        lastActivity = Date()
+        isQuiet = false
+    }
+
+    /// Which ring is under a point, if any — for a click rather than a hover.
+    /// The rail has to be open: a collapsed rail is not showing any rings.
+    package func slotID(at point: CGPoint) -> String? {
+        guard openness.value >= 0.5 else { return nil }
+        return PanelHitArea.slot(at: point, edge: placement.edge,
+                                 slots: entries.map(\.slot),
+                                 railTop: railOrigin.y, railLeading: railOrigin.x,
+                                 docked: placement.isDocked)?.id
+    }
+
     /// Whether any ring has a reading yet. A render waits for this; the window
     /// does not, because it is redrawn thirty times a second either way.
     package var hasAnyReading: Bool {

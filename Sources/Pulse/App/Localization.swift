@@ -163,7 +163,7 @@ extension String {
     /// the key itself and the app stays in English no matter the system
     /// language or the user's choice.
     #if canImport(Darwin)
-    static func localized(_ key: String.LocalizationValue) -> String {
+    package static func localized(_ key: String.LocalizationValue) -> String {
         String(localized: key, bundle: LocalizationSource.bundle)
     }
     #else
@@ -193,13 +193,13 @@ extension String {
     /// — a string literal can be a `String` — and the compiler picks this one,
     /// which is the collapse the whole shim exists to prevent. A different label
     /// makes the choice explicit at every call site that has one to make.
-    static func localized(raw key: String) -> String {
+    package static func localized(raw key: String) -> String {
         LocalizationSource.bundle.localizedString(forKey: key, value: key, table: nil)
     }
 
     /// The interpolated form, through `LocalizedKey`. See that type for why the
     /// key and its arguments have to stay apart until the table has been read.
-    static func localized(_ key: LocalizedKey) -> String {
+    package static func localized(_ key: LocalizedKey) -> String {
         let translated = LocalizationSource.bundle.localizedString(
             forKey: key.key, value: key.key, table: nil)
         guard !key.arguments.isEmpty else { return translated }
@@ -243,29 +243,29 @@ extension Text {
 /// is upstream's spelling and the tables are keyed by what it produces; adding
 /// an argument to sixty-three calls would have been a change to how every
 /// translated string in the app is authored.
-struct LocalizedKey: ExpressibleByStringInterpolation, Sendable {
-    let key: String
-    let arguments: [String]
+package struct LocalizedKey: ExpressibleByStringInterpolation, Sendable {
+    package let key: String
+    package let arguments: [String]
 
-    init(stringLiteral value: String) {
+    package init(stringLiteral value: String) {
         self.key = value
         self.arguments = []
     }
 
-    init(stringInterpolation: Interpolation) {
+    package init(stringInterpolation: Interpolation) {
         self.key = stringInterpolation.key
         self.arguments = stringInterpolation.arguments
     }
 
-    struct Interpolation: StringInterpolationProtocol {
+    package struct Interpolation: StringInterpolationProtocol {
         fileprivate(set) var key = ""
         fileprivate(set) var arguments: [String] = []
 
-        init(literalCapacity: Int, interpolationCount: Int) {
+        package init(literalCapacity: Int, interpolationCount: Int) {
             key.reserveCapacity(literalCapacity + interpolationCount * 2)
         }
 
-        mutating func appendLiteral(_ literal: String) {
+        package mutating func appendLiteral(_ literal: String) {
             key += literal
         }
 
@@ -273,7 +273,7 @@ struct LocalizedKey: ExpressibleByStringInterpolation, Sendable {
         /// set — `String`, `Int`, `Double` — would leave `URL`, `Date` or a
         /// provider's own type unresolvable at the call site, which is how a
         /// shim becomes a reason to change upstream code after all.
-        mutating func appendInterpolation<T>(_ value: T) {
+        package mutating func appendInterpolation<T>(_ value: T) {
             key += "%@"
             arguments.append(String(describing: value))
         }

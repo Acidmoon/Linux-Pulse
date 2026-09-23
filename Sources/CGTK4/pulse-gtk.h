@@ -156,6 +156,92 @@ static inline void pulse_drawing_area_set_draw(GtkWidget* area,
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(area), callback, user_data, NULL);
 }
 
+// MARK: - Menus, and clicks
+
+/* A popover: the menu the panel never had.
+ *
+ * **Upstream's menu bar had Settings and Quit, and on Linux there was nothing.**
+ * A reader who started the panel could not stop it except by killing the
+ * process, which is not a way to treat somebody's application. The tray icon
+ * that would hold those items on a Mac does not exist here — GTK4 has no tray
+ * API — so they go on the panel itself, on a right-click.
+ *
+ * Buttons rather than a `GMenu`: a menu is scaffolding for four actions, and
+ * `GMenu`/`GAction` would be another several bindings to learn for as many
+ * lines. */
+static inline GtkWidget* pulse_popover_new(void) {
+    GtkWidget* popover = gtk_popover_new();
+    GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    gtk_widget_set_margin_top(box, 6);
+    gtk_widget_set_margin_bottom(box, 6);
+    gtk_widget_set_margin_start(box, 6);
+    gtk_widget_set_margin_end(box, 6);
+    gtk_popover_set_child(GTK_POPOVER(popover), box);
+    return popover;
+}
+
+static inline void pulse_popover_add_button(GtkWidget* popover, const char* label,
+                                            GCallback callback, void* data) {
+    GtkWidget* box = gtk_popover_get_child(GTK_POPOVER(popover));
+    if (box == NULL) return;
+    GtkWidget* button = gtk_button_new_with_label(label);
+    /* Flat, so a menu of four lines does not look like a dialogue box. */
+    gtk_widget_add_css_class(button, "flat");
+    gtk_widget_set_halign(button, GTK_ALIGN_FILL);
+    if (callback != NULL) {
+        g_signal_connect_data(G_OBJECT(button), "clicked", callback, data, NULL,
+                              (GConnectFlags)0);
+    }
+    gtk_box_append(GTK_BOX(box), button);
+}
+
+/* Where the pointer is, so a right-click opens the menu under the hand rather
+ * than in a corner. `gtk_popover_popup` needs a rectangle to point at; a
+ * one-pixel box at the pointer is what the documentation suggests and what every
+ * toolkit does. */
+static inline void pulse_popover_popup_at_pointer(GtkWidget* popover) {
+    GdkDevice* pointer = gdk_seat_get_pointer(
+        gdk_display_get_default_seat(gdk_display_get_default()));
+    if (pointer == NULL) {
+        gtk_popover_popup(GTK_POPOVER(popover));
+        return;
+    }
+    GdkSurface* surface = gtk_native_get_surface(gtk_widget_get_native(popover));
+    double x = 0, y = 0;
+    if (surface != NULL && gdk_surface_get_device_position(surface, pointer, &x, &y, NULL)) {
+        GdkRectangle rect = {(int)x, (int)y, 1, 1};
+        gtk_popover_set_pointing_to(GTK_POPOVER(popover), &rect);
+        gtk_popover_set_has_arrow(GTK_POPOVER(popover), FALSE);
+    }
+    gtk_popover_popup(GTK_POPOVER(popover));
+}
+
+static inline void pulse_popover_popdown(GtkWidget* popover) {
+    gtk_popover_popdown(GTK_POPOVER(popover));
+}
+
+/* A popover belongs to a widget the way a child does, but `popup` measures
+ * against the surface rather than the parent's allocation — so it is parented
+ * to the drawing area and points at the pointer. */
+static inline void pulse_widget_set_parent(GtkWidget* widget, GtkWidget* parent) {
+    gtk_widget_set_parent(widget, parent);
+}
+
+/* A click gesture on one mouse button. The button is a `GtkGestureSingle`
+ * property, so this is how a left click and a right click are told apart — and
+ * the event controllers' signal signatures are what Swift is handed. */
+static inline void* pulse_click_gesture(GtkWidget* widget, unsigned button,
+                                        GCallback callback, void* data) {
+    GtkGesture* gesture = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture), button);
+    if (callback != NULL) {
+        g_signal_connect_data(G_OBJECT(gesture), "pressed", callback, data, NULL,
+                              (GConnectFlags)0);
+    }
+    gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(gesture));
+    return gesture;
+}
+
 /* Pointer motion and leaving, as an event controller.
  *
  * The controller is returned rather than the signals being connected here,
