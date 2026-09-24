@@ -24,10 +24,13 @@ enum PanelCommand {
     static let positionArgument = "--position"
     static let autostartArgument = "--autostart"
     static let quitArgument = "--quit"
+    static let collapseArgument = "--auto-collapse"
+    static let remainingArgument = "--shows-remaining"
 
     /// The arguments this command owns, so the entry point can ask whether any
     /// of them is present without knowing how many there are.
-    static let arguments = [placeArgument, positionArgument, autostartArgument, quitArgument]
+    static let arguments = [placeArgument, positionArgument, autostartArgument, quitArgument,
+                            collapseArgument, remainingArgument]
 
     /// Whether this command owns an argument, **without doing anything about
     /// it**.
@@ -47,6 +50,8 @@ enum PanelCommand {
         case positionArgument: return position()
         case autostartArgument: return autostart()
         case quitArgument: return quit()
+        case collapseArgument: return setCollapse()
+        case remainingArgument: return setRemaining()
         default: return nil
         }
     }
@@ -109,6 +114,59 @@ enum PanelCommand {
                          display: placement.display)
         print("Pulse: \(describe(placement))")
         return tellRunningPanel()
+    }
+
+    /// `pulse --auto-collapse off`, which is the one that decides whether there
+    /// is anything to look at.
+    ///
+    /// **Collapsed is the default and it hides everything.** Docked and
+    /// auto-collapsing, the rail rests at `openness` 0 — a 64-pixel sliver of
+    /// background with no ring and no figure on it, which is the macOS app's
+    /// behaviour and reads as a bug the first time somebody sees it: a thin dark
+    /// line at the edge of the screen and no indication that their quota is
+    /// behind it. Upstream puts this in the Settings window. There is no
+    /// Settings window, and the person who asked why they could not see their
+    /// usage had to be told to edit a plist — which is the answer this command
+    /// exists to stop being necessary.
+    private static func setCollapse() -> Int32 {
+        guard let enabled = boolean(after: collapseArgument) else {
+            return missing(collapseArgument, "<on|off>")
+        }
+        let settings = AppSettings.restored()
+        settings.autoCollapse = enabled
+        PulseDefaults.shared.synchronize()
+        print(enabled
+              ? "Pulse: the rail collapses to the edge until you point at it."
+              : "Pulse: the rail stays open — every ring and its figure on screen.")
+        return tellRunningPanel()
+    }
+
+    /// `pulse --shows-remaining on` — whether a ring reads what is left or what
+    /// has been used. Both are the same number seen from either end, and which
+    /// one a reader wants is not something to guess at.
+    private static func setRemaining() -> Int32 {
+        guard let enabled = boolean(after: remainingArgument) else {
+            return missing(remainingArgument, "<on|off>")
+        }
+        let settings = AppSettings.restored()
+        settings.showsRemaining = enabled
+        PulseDefaults.shared.synchronize()
+        print(enabled
+              ? "Pulse: rings show what is left."
+              : "Pulse: rings show what has been used.")
+        return tellRunningPanel()
+    }
+
+    /// `on`/`off` and the usual synonyms, or `nil` for anything else — so a
+    /// mistyped value is refused rather than read as `false`, which is what
+    /// `Bool.init(_:)`-style parsing does to it.
+    private static func boolean(after argument: String) -> Bool? {
+        guard let word = value(after: argument) else { return nil }
+        switch word.lowercased() {
+        case "on", "yes", "true", "1": return true
+        case "off", "no", "false", "0": return false
+        default: return nil
+        }
     }
 
     private static func autostart() -> Int32 {
@@ -174,6 +232,22 @@ enum PanelCommand {
     /// wanted. The same shape `ProviderCommand` uses.
     private static func note(_ text: String) {
         FileHandle.standardError.write(Data((text + "\n").utf8))
+    }
+
+    /// What `--help` prints for these, kept here so the list cannot drift from
+    /// the arguments the command answers to.
+    static var usageLines: String {
+        """
+          \(placeArgument) <edge>       left, right, top, or float
+          \(positionArgument) <0.0-1.0> where along that edge it sits,
+                                 0 at the start, 0.5 centred, 1 at the end
+          \(collapseArgument) <on|off>  whether the rail hides at the screen edge
+                                 until you point at it (on by default)
+          \(remainingArgument) <on|off> whether a ring reads what is left
+                                 or what has been used
+          \(autostartArgument) <on|off> start it at login
+          \(quitArgument)               stop it
+        """
     }
 
     private static func missing(_ argument: String, _ shape: String) -> Int32 {

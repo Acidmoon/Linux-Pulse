@@ -447,6 +447,32 @@ final class Panel {
         return 1
     }
 
+    /// Lets the process's own async work run.
+    ///
+    /// **The panel's main loop is GLib's, and GLib's main loop does not drain
+    /// libdispatch's main queue** — which on Linux is what `@MainActor` and
+    /// `DispatchQueue.main` are. Every `Task { }` in `UsageStore`, and every
+    /// network completion that hops back to the main actor, was waiting on a
+    /// queue nobody serviced: the panel drew its rings, the store never filled
+    /// them, and `pulse --json` from the same binary answered fine because
+    /// `--json` is not a GTK program.
+    ///
+    /// Measured before choosing this: a program that schedules a `@MainActor`
+    /// task and a `DispatchQueue.main.async` block and then loops on
+    /// `Thread.sleep` runs **neither**; the same program looping on
+    /// `RunLoop.current.run(mode:before:)` runs both. So the timer is the fix.
+    ///
+    /// A zero-length run processes what is already queued and does not wait, so
+    /// this costs a check per tick rather than a wait — and it cannot re-enter
+    /// GTK, because the sources the run loop services are Foundation's, not
+    /// GLib's.
+    static let pumpCallback: @convention(c) (UnsafeMutableRawPointer?) -> Int32 = { _ in
+        MainActor.assumeIsolated {
+            _ = RunLoop.current.run(mode: .default, before: Date())
+        }
+        return 1
+    }
+
     /// `SIGTERM`: `pulse --quit`, and the session's own logout.
     private static let terminateCallback: @convention(c) (UnsafeMutableRawPointer?) -> Int32 = { _ in
         MainActor.assumeIsolated {
@@ -647,9 +673,15 @@ final class Panel {
                                           Int32(region.width), Int32(region.height))
         }
 
+        if ProcessInfo.processInfo.environment["PULSE_PANEL_DEBUG"] != nil {
+            FileHandle.standardError.write(Data(
+                ("drawing: \(model.drawSummary()), area \(width)x\(height)\n").utf8))
+        }
+
         model.draw(into: canvas,
                    size: CGSize(width: Double(width), height: Double(height)),
                    at: Date())
+
     }
 }
 
@@ -719,6 +751,10 @@ if let index = CommandLine.arguments.firstIndex(of: "--render"),
 }
 
 pulse_init()
+
+// **Before anything async is asked for**, so nothing the store schedules at
+// startup is queued before there is anything to drain it.
+_ = pulse_on_interval(4, unsafeBitCast(Panel.pumpCallback, to: GCallback.self), nil)
 
 guard let application = pulse_application_new() else {
     FileHandle.standardError.write(Data("Pulse: could not start GTK.\n".utf8))

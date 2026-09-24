@@ -1226,6 +1226,9 @@ final class AppSettings {
         if let remaining = stored[Key.showsRemaining] as? Bool {
             showsRemaining = remaining
         }
+        if let collapse = stored[Key.autoCollapse] as? Bool {
+            autoCollapse = collapse
+        }
         #endif
     }
 

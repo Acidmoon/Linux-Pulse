@@ -38,6 +38,31 @@ enum SettingsFile {
         return URL(fileURLWithPath: config).appendingPathComponent("\(suiteName).plist")
     }
 
+    /// Makes this process's defaults equal to the file, before it writes
+    /// anything of its own.
+    ///
+    /// **Because a stale copy gets flushed back over the file.** `UserDefaults`
+    /// on Linux keeps the parsed domain in memory and writes the **whole**
+    /// domain on any `set`. So a long-lived process that loaded the file before
+    /// another process changed it will, on its next unrelated write, put its old
+    /// values back — and the panel is exactly that process.
+    ///
+    /// This is not hypothetical. It is how `settings.autoCollapse` returned to
+    /// `True` after `pulse --auto-collapse off` had set it to `False`, and the
+    /// rail went back to hiding itself at the screen edge: the panel had loaded
+    /// the file while it still said `True`, wrote some other setting, and the
+    /// whole domain went with it. Nothing was lost except the one change that
+    /// had been made from outside, which is the change that is hard to see.
+    ///
+    /// Filling the domain from the file first means the flush carries the
+    /// reader's values rather than the process's memory of them.
+    static func adopt(into defaults: UserDefaults) {
+        guard let stored = read() else { return }
+        for (key, value) in stored {
+            defaults.set(value, forKey: key)
+        }
+    }
+
     /// The stored settings, as they are on disk at this moment.
     ///
     /// `nil` when there is no file or it cannot be parsed — a first run, or a

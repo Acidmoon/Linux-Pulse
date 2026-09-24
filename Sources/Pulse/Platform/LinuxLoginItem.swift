@@ -46,6 +46,32 @@ enum LinuxLoginItem {
     /// Found beside the running executable, the way `PulseLinuxMain` finds it
     /// for `pulse` with no arguments: the two are installed together and
     /// finding a *different* Pulse on `PATH` would be worse than finding none.
+    /// Where this command actually is.
+    ///
+    /// **`/proc/self/exe`, not `argv[0]`, and that is measured.** A command
+    /// found through `PATH` is invoked with the *bare* word as `argv[0]` —
+    /// `pulse`, with no directory in it — so `deletingLastPathComponent` comes
+    /// out empty and every candidate derived from it is thrown away. The
+    /// symptom was `pulse --autostart on` answering "Is PulsePanel next to this
+    /// binary?" on an install where `PulsePanel` was exactly where it belongs.
+    ///
+    /// The kernel's own answer, and it follows symlinks — which is what makes
+    /// `$prefix/bin/pulse` a symlink to `$prefix/lib/pulse/Pulse` work: the
+    /// panel is looked for beside the real file, where the installer put it.
+    /// `Bundle.module` resolves through the same thing for the same reason.
+    static var ownExecutablePath: String {
+        #if canImport(Glibc)
+        if let target = try? FileManager.default.destinationOfSymbolicLink(atPath: "/proc/self/exe"),
+           !target.isEmpty {
+            return target
+        }
+        #endif
+        // Whatever was typed, when there is no `/proc` — the shape this had
+        // before, which is right for an absolute path and wrong only for a bare
+        // name.
+        return URL(fileURLWithPath: CommandLine.arguments.first ?? "").standardized.path
+    }
+
     static var panelExecutable: String? {
         // **Absolute, because the session that reads this file is not started
         // from the shell that wrote it.** `CommandLine.arguments.first` is
@@ -54,8 +80,7 @@ enum LinuxLoginItem {
         // the login session's working directory, which is not this one. The
         // desktop file was written, the state read back as "on", and nothing
         // would have started at login.
-        let selfPath = URL(fileURLWithPath: CommandLine.arguments.first ?? "").standardized.path
-        let directory = (selfPath as NSString).deletingLastPathComponent
+        let directory = (ownExecutablePath as NSString).deletingLastPathComponent
         let candidates = [
             directory.isEmpty ? nil : (directory as NSString).appendingPathComponent("PulsePanel"),
             // Installed to a `lib` directory beside the one on `PATH`, which is

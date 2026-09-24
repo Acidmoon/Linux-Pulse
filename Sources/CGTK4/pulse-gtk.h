@@ -574,6 +574,20 @@ static inline unsigned int pulse_on_signal(int signum, GCallback handler, void* 
     return g_unix_signal_add(signum, (GSourceFunc)handler, data);
 }
 
+/* **A repeating timer, for draining the main queue.** `g_main_loop_run` — which
+ * is what `g_application_run` is — does not drain libdispatch's main queue, and
+ * on Linux `@MainActor` and `DispatchQueue.main` work *is* that queue. So a
+ * GTK-only main thread runs GLib sources and nothing else: every `Task { }`, and
+ * every network completion that hops back to the main actor, waits forever.
+ *
+ * Measured, with a program that schedules one of each and then loops: inside a
+ * plain `Thread.sleep` loop neither ever ran. Inside
+ * `RunLoop.current.run(mode:before:)` both did. Hence a timer that does that. */
+static inline unsigned int pulse_on_interval(unsigned int milliseconds, GCallback handler,
+                                             void* data) {
+    return g_timeout_add(milliseconds, (GSourceFunc)handler, data);
+}
+
 /* `SIGTERM` as `pulse --quit` sends it, and as a compositor or a session manager
  * sends it at logout. Both should take the same path out. */
 static inline int pulse_raise(int pid, int signum) {

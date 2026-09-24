@@ -1,5 +1,14 @@
 # 无 GUI 命令行接口
 
+先装一次，`pulse` 才是命令：
+
+```bash
+Scripts/linux/install.sh        # 装到 ~/.local，并把 ~/.local/bin 加进 PATH 的提示打出来
+```
+
+没装之前，下面所有 `pulse` 都要写成 `./.build/release/Pulse`（注意大写 P）。
+详见 `Docs/linux/install.md`。
+
 阶段一的交付物就是这一节的两个命令。它们合起来是完整的无头面：**`--refresh` 把数字放进去，`--json` 把数字读出来。**
 
 `--json` 的输出格式契约属于上游，不在本文档里重复：

@@ -59,6 +59,42 @@ and says which versions it found. If a machine cannot install them,
 instead — that is how this port was built, and the script says what it does and
 what it does not.
 
+## Installing
+
+```sh
+Scripts/linux/install.sh                 # into ~/.local
+Scripts/linux/install.sh --prefix /usr/local
+Scripts/linux/install.sh --uninstall
+```
+
+**A build directory is not an installation, and the documentation said it was.**
+Everything here writes `pulse --json` and `pulse --place`, and a reader who typed
+that got `找不到命令 pulse` — on a machine where the binary is called `Pulse`,
+capitalised, and lives in `.build/release/`. The script builds a release build if
+there is not one, then installs:
+
+```
+~/.local/bin/pulse                 → ~/.local/lib/pulse/Pulse    (a symlink)
+~/.local/lib/pulse/PulsePanel      the panel
+~/.local/lib/pulse/Pulse_Pulse.bundle   provider logos and strings
+```
+
+**Only a symlink in `bin`, everything else in `lib/pulse`, and both halves
+matter.** The symlink is what makes the command the name the documentation uses
+and the name `PATH` already has. The real file being in `lib/pulse` is what makes
+`Bundle.module` find the resources — it resolves through `/proc/self/exe`, which
+follows the link — and what makes `--autostart` write an `Exec` line naming
+`lib/pulse/PulsePanel`, resolved by the rule in `LinuxLoginItem`. Verified by
+installing to a scratch prefix and rendering the same rail from both locations,
+byte for byte.
+
+If the panel's libraries are outside the loader's search path — which is the
+documented path on Ubuntu 24.04, where `libgtk4-layer-shell` is not packaged and
+`Scripts/linux/gtk4-sysroot.sh` puts it somewhere of its own — the installer
+writes `PulsePanel` as a two-line shell wrapper that sets `LD_LIBRARY_PATH` and
+execs the real binary at `.PulsePanel`. Both `pulse` with no arguments and the
+autostart entry look for the name `PulsePanel`, and both run a script happily.
+
 ## Running
 
 ```sh
@@ -67,9 +103,21 @@ pulse --json        # what the panel will show, as JSON
 pulse               # with no arguments: open the panel
 ```
 
-The last one finds `PulsePanel` beside itself and hands the process over with
-`execv`, so the panel inherits the terminal and the command returns when the
-panel exits.
+Without the installer, the same commands are `./.build/release/Pulse --refresh`
+and so on; `Scripts/linux/install.sh` above is what makes `pulse` a word.
+
+The last one finds the panel **that belongs to this command** — beside the real
+binary, or in `../lib/pulse` — and hands the process over with `execv`, so the
+panel inherits the terminal and the command returns when the panel exits. It
+does not search `PATH`: finding a different Pulse's panel would be worse than
+finding none. When there is no panel it says so, rather than printing the usage
+text at somebody who asked for a window.
+
+**The path is found through `/proc/self/exe`, not `argv[0]`, and that is
+measured.** A command reached through `PATH` is invoked with the bare word as
+`argv[0]` — `pulse`, with no directory in it — so anything derived from it is
+empty. The symptom was `pulse --autostart on` answering "Is PulsePanel next to
+this binary?" on an install where `PulsePanel` was exactly where it belongs.
 
 The panel is docked to a screen edge, floats above other windows, keeps out of
 the task list, and takes no focus. Move the pointer to the edge and the rail
@@ -82,20 +130,26 @@ command line reads, by name rather than by file location: see
 ## Starting it at login
 
 ```sh
-# From the app once it has a settings window, or by hand:
-mkdir -p ~/.config/autostart
-cat > ~/.config/autostart/pulse.desktop <<EOF
+pulse --autostart on      # writes the file below
+pulse --autostart off
+```
+
+That writes `~/.config/autostart/pulse.desktop`:
+
+```ini
 [Desktop Entry]
 Type=Application
 Name=Pulse
-Exec=$PWD/.build/release/PulsePanel
+Exec=/home/you/.local/lib/pulse/PulsePanel
 Terminal=false
 StartupNotify=false
-EOF
 ```
 
 `LinuxLoginItem` writes exactly that file, and `pulse.desktop` is what a
-desktop's own startup-applications list will show and can remove.
+desktop's own startup-applications list will show and can remove. The `Exec` path
+is absolute — an `Exec` of `./…` would be resolved against the login session's
+working directory, which is not the one it was written from, and the entry would
+be there, read back as "on", and start nothing.
 
 ## Wayland and X11
 

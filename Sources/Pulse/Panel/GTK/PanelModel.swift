@@ -114,6 +114,21 @@ package final class PanelModel {
     /// target and the panel is a different one.
     package func placementSummary() -> String { "\(placement) \(panelSize)" }
 
+    /// A diagnostic line, for the question "is the rail open and has it
+    /// anything to draw".
+    package func drawSummary() -> String {
+        "openness \(String(format: "%.3f", openness.value))/\(openness.target) "
+            + "rings \(String(format: "%.3f", ringsOpacity)), "
+            + "origin (\(Int(railOrigin.x)), \(Int(railOrigin.y))), "
+            + "entries \(entries.count), rail \(railSize), "
+            + "readings ["
+            + entries.map { entry in
+                let percent = entry.headline.map { String(Int($0.usedFraction * 100)) } ?? "none"
+                return "\(entry.id):\(percent)"
+            }.joined(separator: " ")
+            + "], pending \(store.isRefreshing)"
+    }
+
     /// Re-reads the settings and applies them to the objects the panel is
     /// already using. This is the panel end of `pulse --place`.
     ///
@@ -129,6 +144,11 @@ package final class PanelModel {
     /// — the card's metrics, the language — are read where they are used and
     /// need no reload.
     package func reloadSettings() {
+        // **The file first, into the process's own defaults, so the panel's next
+        // write cannot put its remembered values back over the reader's.** See
+        // `SettingsFile.adopt`; this is the bug that made the rail hide again
+        // every time something set it not to.
+        SettingsFile.adopt(into: PulseDefaults.shared)
         settings.adoptCommandLineSettings()
         placement = PanelPlacement.reloaded()
         // The rail's shape follows from which accounts are on it, so it is

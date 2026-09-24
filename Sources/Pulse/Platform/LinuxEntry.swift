@@ -120,22 +120,41 @@ enum PulseLinuxMain {
             return 0
         }
 
+        // **Said, rather than a bare usage dump.** The usage text is the same
+        // wall of options whoever is reading it, and it does not contain the
+        // one fact that matters here: this build has no panel. Reached most
+        // often by somebody who built the command line alone — `swift build
+        // --product Pulse` on a machine without GTK4 — and then typed `pulse`.
+        if CommandLine.arguments.count == 1 {
+            FileHandle.standardError.write(Data("""
+            Pulse: no panel is installed beside this command, so there is \
+            nothing to open.
+
+              \\(LinuxLoginItem.fileURL.path) is not there either, so nothing \
+            will start one at login.
+
+            The command line does not need the panel. Try `pulse --help`, or \
+            `pulse --json` for the last readings.
+            """.utf8))
+            return 2
+        }
+
         FileHandle.standardError.write(Data(usage.utf8))
         return 2
     }
 
-    /// The panel executable beside this one, if it was built.
+    /// The panel executable that belongs to this command.
     ///
-    /// Beside, not on `PATH`: the two are installed together by
-    /// `Scripts/install.sh`, and finding a *different* Pulse on `PATH` would be
-    /// worse than finding none.
-    private static func siblingPanel() -> String? {
-        let selfPath = CommandLine.arguments.first ?? ""
-        let directory = (selfPath as NSString).deletingLastPathComponent
-        guard !directory.isEmpty else { return nil }
-        let candidate = (directory as NSString).appendingPathComponent("PulsePanel")
-        return FileManager.default.isExecutableFile(atPath: candidate) ? candidate : nil
-    }
+    /// Not from `PATH`: finding a *different* Pulse's panel would be worse than
+    /// finding none. The two places it can be are in `LinuxLoginItem`, which
+    /// works out the same path for the autostart entry — **one implementation,
+    /// because there were two and they disagreed.** This one knew only about a
+    /// panel *beside* the command, and `Scripts/linux/install.sh` puts the
+    /// command in `$prefix/bin` as a symlink and everything else in
+    /// `$prefix/lib/pulse` — so an installed `pulse` with no arguments found no
+    /// panel, printed the usage text, and left a reader looking at a list of
+    /// options instead of at the thing they asked for.
+    private static func siblingPanel() -> String? { LinuxLoginItem.panelExecutable }
 
     /// `execv`, so the panel inherits this terminal and this process becomes
     /// it. Returns false when the kernel refuses, in which case the caller says
@@ -176,11 +195,7 @@ enum PulseLinuxMain {
         The panel itself. These take effect immediately on a panel that is
         already running, so nothing has to be killed and restarted:
 
-          \(PanelCommand.placeArgument) <edge>        left, right, top, or float
-          \(PanelCommand.positionArgument) <0.0-1.0> where along that edge it sits,
-                                 0 at the start, 0.5 centred, 1 at the end
-          \(PanelCommand.autostartArgument) <on|off>  start it at login
-          \(PanelCommand.quitArgument)                stop it
+        \(PanelCommand.usageLines)
 
           --help                 this
 
