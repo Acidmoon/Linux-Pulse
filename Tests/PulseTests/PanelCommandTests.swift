@@ -190,4 +190,41 @@ struct PanelCommandTests {
             #expect(PanelProcess.running() == nil)
         }
     }
+
+    // MARK: - The settings file, and the write-back
+
+    /// **The bug that hid the rail.** `UserDefaults` on Linux writes the whole
+    /// in-memory domain on any `set`, so a long-lived process that loaded the
+    /// file before another process changed it puts its remembered values back
+    /// over the change. `adopt` is what stops that, and this is the assertion
+    /// that it does: the stale value is replaced, and a later write keeps the
+    /// file's value rather than the process's memory of it.
+    @Test("A stale value in memory does not survive an adopt and a write")
+    func staleValuesAreReplaced() throws {
+        try inOwnSettings {
+            PulseDefaults.shared.set(true, forKey: "settings.autoCollapse")   // what the panel loaded
+            try? PropertyListSerialization
+                .data(fromPropertyList: ["settings.autoCollapse": false], format: .xml, options: 0)
+                .write(to: SettingsFile.url)                                  // what the command wrote
+
+            SettingsFile.adopt(into: PulseDefaults.shared)
+            #expect(PulseDefaults.shared.object(forKey: "settings.autoCollapse") as? Bool == false)
+
+            // An unrelated write, which is what used to flush the stale domain.
+            PulseDefaults.shared.set("B", forKey: "panel.display")
+            #expect(PulseDefaults.shared.object(forKey: "settings.autoCollapse") as? Bool == false,
+                    "the unrelated write put the old value back")
+        }
+    }
+
+    /// No file is the first run, and it must not clear what is already there.
+    @Test("Adopting with no file leaves the defaults alone")
+    func noFileIsHarmless() throws {
+        try inOwnSettings {
+            try? FileManager.default.removeItem(at: SettingsFile.url)
+            PulseDefaults.shared.set("kept", forKey: "unrelated")
+            SettingsFile.adopt(into: PulseDefaults.shared)
+            #expect(PulseDefaults.shared.string(forKey: "unrelated") == "kept")
+        }
+    }
 }
